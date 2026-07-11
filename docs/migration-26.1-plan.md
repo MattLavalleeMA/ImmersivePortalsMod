@@ -1129,10 +1129,7 @@ the last mechanical batch (not compile errors, so not in the count above):**
   real in-game testing across dimensions to see whether the new pipeline still
   has the original problem at all.
 
-**Priority order for remaining work** (genuinely open items only —
-`MixinGameRenderer.java`'s weave-time fix that used to be listed first here is
-DONE and has been moved to the changelog; see the "Newly-discovered" bullets
-above for its writeup):
+**Priority order for remaining work:**
 
 1. **`net.minecraft.gizmos` debug-drawing system (newly discovered, not yet
    investigated)**: vanilla's old `LevelRenderer.renderLineBox(...)` convenience
