@@ -984,36 +984,47 @@ reference/context only.**
 the last mechanical batch (not compile errors, so not in the count above):**
 
 - **`MixinCamera.java`'s `@Inject` targeting `Camera.setup(BlockGetter,Entity,
-  boolean,boolean,float)`**: that method overload no longer exists (`Camera` was
-  reworked around `update(DeltaTracker)`, which reads detached/mirrored state
-  directly from `Minecraft.options.getCameraType()` instead of taking explicit
-  booleans — confirmed via decompiled source). The 2 real call sites that used to
-  call `Camera.setup(...)` directly (`CrossPortalViewRendering.java`,
-  `TransformationManager.java`) were fixed by calling `.setLevel(...)`/
-  `.setEntity(...)` then `.update(RenderStates.fixedDeltaTracker(partialTick))`
-  instead (a new small helper added to `RenderStates` that wraps a fixed partial
-  tick into a `DeltaTracker`) — this produces identical behavior since the mod's
-  own `isThirdPerson()`/`isFrontView()` helpers already just read
+  boolean,boolean,float)`** — **fixed**. That method overload no longer exists
+  (`Camera` was reworked around `update(DeltaTracker)`, which reads
+  detached/mirrored state directly from `Minecraft.options.getCameraType()`
+  instead of taking explicit booleans — confirmed via decompiled source). The 2
+  real call sites that used to call `Camera.setup(...)` directly
+  (`CrossPortalViewRendering.java`, `TransformationManager.java`) were fixed by
+  calling `.setLevel(...)`/`.setEntity(...)` then
+  `.update(RenderStates.fixedDeltaTracker(partialTick))` instead (a new small
+  helper added to `RenderStates` that wraps a fixed partial tick into a
+  `DeltaTracker`) — this produces identical behavior since the mod's own
+  `isThirdPerson()`/`isFrontView()` helpers already just read
   `client.options.getCameraType()` the same way `Camera` does internally now, so
-  nothing was actually lost. `MixinCamera.java`'s injection target string itself
-  still references the removed overload though, so it will silently fail to
-  weave — needs updating to target `update(DeltaTracker)` instead (same category
-  as the already-tracked `MixinGameRenderer` item below).
+  nothing was actually lost. `MixinCamera.java`'s injection target itself has
+  now also been updated to target `update(DeltaTracker)` at `RETURN` (confirmed
+  via decompiled `Camera.update()` that entity/level are already set by the time
+  it's called, and `WorldRenderInfo.adjustCameraPos(...)` only needs the
+  post-update camera state, same as before) — also corrected the `@Shadow level`
+  field's declared type from the stale `BlockGetter` to the real field's actual
+  type `Level` (was only compiling before because `Level extends BlockGetter`,
+  a widening that happened to be assignment-compatible but wasn't the real
+  shadowed type). Rebuilt and confirmed the error count is unchanged (61,
+  since this was never a compile error) — no regressions.
 - **`MixinFogRenderer.java` (`multiworld_awareness` package) `@Shadow`s 6 static
   fields (`fogRed`/`fogGreen`/`fogBlue`/`targetBiomeFog`/`previousBiomeFog`/
   `biomeChangedTime`) that no longer exist on `FogRenderer` at all** (confirmed
   via `javap --private` — `FogRenderer` is now instance-based with GPU-buffer-
   backed fog data, no mutable static color state to shadow). This mixin will fail
-  to weave. `FogRendererContext.getFogColorOf(...)` (the one caller that had an
-  actual compile error from this cluster, via the now-removed
-  `FogRenderer.setupColor(...)` static method) was fixed independently by calling
-  the new instance method `FogRenderer#setupFog(Camera,int,DeltaTracker,float,
-  ClientLevel)` directly (returns a `FogData` with the color already computed, via
-  a lazily-created cached `FogRenderer` instance in `FogRendererContext` itself)
-  — bypassing the broken static-field-shadowing mechanism entirely for that call
-  site. `getDarkenWorldAmount(float)` → `getBossOverlayWorldDarkening(float)`
+  to weave. **Deliberately left unfixed** — unlike `MixinCamera` above, there's no
+  1:1 mechanical replacement for a static-field-swap mechanism against a class
+  that's no longer static/mutable at all; this needs an actual redesign plus
+  real in-game testing, not a guess. `FogRendererContext.getFogColorOf(...)`
+  (the one caller that had an actual compile error from this cluster, via the
+  now-removed `FogRenderer.setupColor(...)` static method) was fixed
+  independently by calling the new instance method
+  `FogRenderer#setupFog(Camera,int,DeltaTracker,float,ClientLevel)` directly
+  (returns a `FogData` with the color already computed, via a lazily-created
+  cached `FogRenderer` instance in `FogRendererContext` itself) — bypassing the
+  broken static-field-shadowing mechanism entirely for that call site.
+  `getDarkenWorldAmount(float)` → `getBossOverlayWorldDarkening(float)`
   confirmed as the exact 1:1 rename via `GameRenderer.extractCamera`'s real call
-  site. **Not yet fixed**: `RendererUsingStencil.java`'s separate call to
+  site. **Still not fixed**: `RendererUsingStencil.java`'s separate call to
   `FogRendererContext.getCurrentFogColor.get()` (reads the *actual current*
   world's live fog color via the same broken static-field-swap mechanism, a
   different use case from the cross-dimension query above) — this one has no
@@ -1051,14 +1062,13 @@ the last mechanical batch (not compile errors, so not in the count above):**
    vanilla debug-drawing helpers turn out to be missing elsewhere, the real Gizmo
    API should be investigated properly instead of continuing to hand-roll
    replacements one at a time.
-3. **`MixinCamera.java`/`MixinFogRenderer.java` weave-time-only breakage (newly
-   discovered this round, not compile errors)**: see the two bullets above (under
-   "Newly-discovered weave-time-only / runtime-only issues") for full details.
-   `MixinCamera.java`'s injection target string needs updating to
-   `Camera.update(DeltaTracker)`; `MixinFogRenderer.java`'s cross-dimension fog
-   color swap needs a real redesign against the new instance/GPU-buffer
+3. **`MixinFogRenderer.java` weave-time-only breakage (not a compile error;
+   `MixinCamera.java`'s equivalent issue was fixed this round — see the
+   "Newly-discovered" bullets above)**: `MixinFogRenderer.java`'s cross-dimension
+   fog color swap needs a real redesign against the new instance/GPU-buffer
    `FogRenderer` (`RendererUsingStencil.java`'s `getCurrentFogColor` use is the
-   one remaining caller depending on it).
+   one remaining caller depending on it) — needs real in-game testing to get
+   right, not a guess.
 4. **Leave for absolute last (confirmed external/blocked, not in-repo fixable)**:
    `GravityChangerInterface.java` (22 errors, archived/dead upstream dependency,
    disabled by default) and `AlternateDimensions.java`/`EntitySync.java`/
@@ -1564,14 +1574,14 @@ Scripts live in `migration_tools/` (pure Python stdlib, no pip packages needed):
    "Priority order for next session(s)" above, item 4. Re-run
    `parse_compile_errors.py --run` at the start of the next session to confirm
    this hasn't regressed.
-2. **Fix the newly-discovered weave-time-only issues** before attempting a dev
-   client launch, since these will otherwise surface as confusing runtime Mixin
-   errors rather than compile errors: `MixinCamera.java`'s injection target
-   (still references the removed `Camera.setup(...)` overload) and
-   `MixinGameRenderer.java`'s hand-rendering hooks (item 1 in the priority list
-   above). `MixinFogRenderer.java`'s cross-dimension fog-color-swap redesign
-   (item 3) can likely wait until real in-game testing is possible, since it's
-   only reachable through the still-stubbed stencil-portal-rendering path.
+2. **Fix the remaining weave-time-only issue** before attempting a dev client
+   launch, since it will otherwise surface as a confusing runtime Mixin error
+   rather than a compile error: `MixinGameRenderer.java`'s hand-rendering hooks
+   (item 1 in the priority list above). `MixinCamera.java`'s equivalent issue was
+   already fixed this round. `MixinFogRenderer.java`'s cross-dimension
+   fog-color-swap redesign (item 3) can likely wait until real in-game testing is
+   possible, since it's only reachable through the still-stubbed
+   stencil-portal-rendering path.
 3. **Get the mod to actually launch in a dev environment** (`./gradlew runClient`)
    with portal rendering left in its current stubbed/no-op state, to establish a
    working baseline and start surfacing any remaining Mixin-weave-time-only
