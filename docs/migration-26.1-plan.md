@@ -1131,7 +1131,19 @@ the last mechanical batch (not compile errors, so not in the count above):**
 
 **Priority order for remaining work:**
 
-1. **`net.minecraft.gizmos` debug-drawing system (newly discovered, not yet
+1. **DimLib fork migration (top priority — actively in progress, unblocks the
+   largest remaining error cluster)**: `AlternateDimensions.java`/`EntitySync.java`/
+   `ImmPtlChunkTickets.java`/`ImmPtlChunkTracking.java`/`ClientWorldLoader.java`/
+   `GlobalPortalStorage.java` (39 errors total) are all blocked on `DimLib` — see
+   "DimLib fork migration" under "Blocking / external dependency issues" above for
+   full scope/progress/next-steps (tracked in a sibling repo at `C:\repos\DimLib`).
+   All the DimLib-blocked files hit the same root cause: they register a
+   `qouteall.dimlib.api.DimensionAPI` event whose functional-interface parameter
+   type is DimLib's own stale-mappings-compiled `ServerLevel`, causing an
+   "invalid method reference"/"cannot access class_3218" against our real
+   `ServerLevel`-typed handler methods. Grep for `qouteall.dimlib` imports to find
+   more of these proactively rather than waiting for them to surface one at a time.
+2. **`net.minecraft.gizmos` debug-drawing system (newly discovered, not yet
    investigated)**: vanilla's old `LevelRenderer.renderLineBox(...)` convenience
    helper was removed outright (not renamed) — a `LineGizmo` class exists in a
    brand-new `net.minecraft.gizmos` package that appears to be vanilla's own
@@ -1140,32 +1152,26 @@ the last mechanical batch (not compile errors, so not in the count above):**
    vanilla debug-drawing helpers turn out to be missing elsewhere, the real Gizmo
    API should be investigated properly instead of continuing to hand-roll
    replacements one at a time.
-2. **`MixinFogRenderer.java` weave-time-only breakage (not a compile error;
+3. **`MixinFogRenderer.java` weave-time-only breakage (not a compile error;
    `MixinCamera.java`'s equivalent issue was fixed this round — see the
    "Newly-discovered" bullets above)**: `MixinFogRenderer.java`'s cross-dimension
    fog color swap needs a real redesign against the new instance/GPU-buffer
    `FogRenderer` (`RendererUsingStencil.java`'s `getCurrentFogColor` use is the
    one remaining caller depending on it) — needs real in-game testing to get
    right, not a guess.
-3. **Leave for absolute last (confirmed external/blocked, not in-repo fixable)**:
-   `GravityChangerInterface.java` (22 errors, archived/dead upstream dependency,
-   disabled by default) and `AlternateDimensions.java`/`EntitySync.java`/
-   `ImmPtlChunkTickets.java`/`ImmPtlChunkTracking.java`/`ClientWorldLoader.java`/
-   `GlobalPortalStorage.java` (39 errors total, all blocked on the `DimLib`
-   migration — see "Blocking / external dependency issues" above). All the
-   DimLib-blocked files hit the same root cause: they register a
-   `qouteall.dimlib.api.DimensionAPI` event whose functional-interface parameter
-   type is DimLib's own stale-mappings-compiled `ServerLevel`, causing an
-   "invalid method reference"/"cannot access class_3218" against our real
-   `ServerLevel`-typed handler methods. Grep for `qouteall.dimlib` imports to find
-   more of these proactively rather than waiting for them to surface one at a time.
+4. **Leave for absolute last (confirmed external/blocked, dead upstream, no
+   migration effort planned)**: `GravityChangerInterface.java` (22 errors,
+   archived/dead upstream dependency, disabled by default). Unlike DimLib, no
+   fork/migration is planned — see item 6 under "DimLib fork migration" above for
+   the open decision (fence off vs. fork).
 
 **Every genuinely mechanical/in-repo-fixable compile-error cluster is done.** The
-only compile errors left (61) are confirmed-external/DimLib-blocked (item 3 in
-the priority list above). The still-stubbed portal-rendering-pipeline pieces
-tracked under "2. Portal rendering algorithm redesign" below (runtime work, not
+only compile errors left (61) are confirmed-external/blocked (items 1 and 4 in
+the priority list above — DimLib actively being migrated, GravityChanger fenced
+off/dead). The still-stubbed portal-rendering-pipeline pieces tracked under
+"2. Portal rendering algorithm redesign" below (runtime work, not
 compile-error-driven anymore per its own section) and the newly-found
-weave-time-only issues (item 2 in the priority list above) are separate from the
+weave-time-only issues (item 3 in the priority list above) are separate from the
 compile-error count entirely. Re-run `parse_compile_errors.py --run` to confirm
 before starting a new session.
 
@@ -1649,10 +1655,11 @@ Scripts live in `migration_tools/` (pure Python stdlib, no pip packages needed):
 ## Next steps
 
 1. **All genuinely in-repo-fixable compile errors are done.** The only compile
-   errors left (61 across 18 symbols) are confirmed-external/DimLib-blocked — see
-   "Priority order for next session(s)" above, item 4. Re-run
-   `parse_compile_errors.py --run` at the start of the next session to confirm
-   this hasn't regressed.
+   errors left (61 across 18 symbols) are external/blocked — see "Priority order
+   for remaining work" above, items 1 (DimLib, actively being migrated in a
+   sibling repo — top priority) and 4 (GravityChanger, fenced off/dead upstream).
+   Re-run `parse_compile_errors.py --run` at the start of the next session to
+   confirm this hasn't regressed.
 2. **All known compile-error-adjacent weave-time-only issues are now fixed**
    (`MixinCamera.java` and `MixinGameRenderer.java`, both this round).
    `MixinFogRenderer.java`'s cross-dimension fog-color-swap redesign (item 3
