@@ -56,15 +56,13 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     @Final
     private FogRenderer fogRenderer;
     
-    // TODO MC 26.1: GameRenderer's own `renderHand` field was removed entirely (not
-    // just made inaccessible -- confirmed via javap that no such field exists anymore),
-    // so this can no longer be a @Shadow. Tracked independently here instead. Note this
-    // flag isn't actually wired into anything that skips rendering the hand yet --
-    // GameRenderer.renderItemInHand's signature also changed shape (now takes
-    // CameraRenderState/Matrix4fc instead of Camera/Matrix4f) which breaks this file's
-    // existing onRenderHandBegins/onRenderHandEnds @Inject hooks at Mixin weave time
-    // (not caught by compileJava, same caveat as MixinLevelRenderer's hooks) -- needs
-    // its own dedicated fix, tracked as part of the portal-rendering-algorithm item.
+    // GameRenderer's own `renderHand` field was removed entirely (not just made
+    // inaccessible -- confirmed via javap that no such field exists anymore), so
+    // this can no longer be a @Shadow. Tracked independently here instead. Note
+    // this flag isn't actually wired into anything that skips rendering the hand
+    // yet -- that's separate portal-rendering-algorithm work, not related to the
+    // onRenderHandBegins/onRenderHandEnds hooks below (those were fixed to match
+    // GameRenderer.renderItemInHand's new CameraRenderState/Matrix4fc signature).
     @Unique
     private boolean renderHand = true;
     @Shadow
@@ -227,12 +225,18 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     private static boolean portal_isRenderingHand = false;
     
     @Inject(method = "renderItemInHand", at = @At("HEAD"))
-    private void onRenderHandBegins(Camera camera, float f, Matrix4f matrix4f, CallbackInfo ci) {
+    private void onRenderHandBegins(
+        net.minecraft.client.renderer.state.level.CameraRenderState cameraRenderState,
+        float f, Matrix4fc matrix4fc, CallbackInfo ci
+    ) {
         portal_isRenderingHand = true;
     }
     
     @Inject(method = "renderItemInHand", at = @At("RETURN"))
-    private void onRenderHandEnds(Camera camera, float f, Matrix4f matrix4f, CallbackInfo ci) {
+    private void onRenderHandEnds(
+        net.minecraft.client.renderer.state.level.CameraRenderState cameraRenderState,
+        float f, Matrix4fc matrix4fc, CallbackInfo ci
+    ) {
         portal_isRenderingHand = false;
     }
     

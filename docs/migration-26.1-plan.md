@@ -1046,13 +1046,17 @@ the last mechanical batch (not compile errors, so not in the count above):**
 
 **Priority order for remaining work:**
 
-1. **`MixinGameRenderer.java` weave-time-only breakage (not a compile error)**:
+1. **`MixinGameRenderer.java` weave-time-only breakage — fixed.**
    `GameRenderer.renderItemInHand` changed signature shape (`CameraRenderState`/
-   `Matrix4fc` instead of `Camera`/`Matrix4f`), which breaks this file's
-   pre-existing `onRenderHandBegins`/`onRenderHandEnds` `@Inject` hooks at Mixin
-   weave time (not caught by `compileJava`) — these track a `portal_isRenderingHand`
-   flag; needs its own fix pass since it isn't guessable without checking real
-   in-game behavior of the new hand-rendering flow.
+   `Matrix4fc` instead of `Camera`/`Matrix4f`, confirmed via javap), which broke
+   this file's `onRenderHandBegins`/`onRenderHandEnds` `@Inject` hooks (which
+   track a `portal_isRenderingHand` flag used by the `bobView` translate
+   modifiers) at Mixin weave time (not caught by `compileJava`). Updated both
+   hooks' parameter lists to match the real new signature
+   (`CameraRenderState, float, Matrix4fc, CallbackInfo`) — the hook bodies
+   themselves needed no changes since they only set/clear the flag, never touch
+   the parameters. Rebuilt and confirmed error count unchanged (61) — no
+   regressions.
 2. **`net.minecraft.gizmos` debug-drawing system (newly discovered, not yet
    investigated)**: vanilla's old `LevelRenderer.renderLineBox(...)` convenience
    helper was removed outright (not renamed) — a `LineGizmo` class exists in a
@@ -1574,14 +1578,11 @@ Scripts live in `migration_tools/` (pure Python stdlib, no pip packages needed):
    "Priority order for next session(s)" above, item 4. Re-run
    `parse_compile_errors.py --run` at the start of the next session to confirm
    this hasn't regressed.
-2. **Fix the remaining weave-time-only issue** before attempting a dev client
-   launch, since it will otherwise surface as a confusing runtime Mixin error
-   rather than a compile error: `MixinGameRenderer.java`'s hand-rendering hooks
-   (item 1 in the priority list above). `MixinCamera.java`'s equivalent issue was
-   already fixed this round. `MixinFogRenderer.java`'s cross-dimension
-   fog-color-swap redesign (item 3) can likely wait until real in-game testing is
-   possible, since it's only reachable through the still-stubbed
-   stencil-portal-rendering path.
+2. **All known compile-error-adjacent weave-time-only issues are now fixed**
+   (`MixinCamera.java` and `MixinGameRenderer.java`, both this round).
+   `MixinFogRenderer.java`'s cross-dimension fog-color-swap redesign (item 3
+   above) can likely wait until real in-game testing is possible, since it's
+   only reachable through the still-stubbed stencil-portal-rendering path.
 3. **Get the mod to actually launch in a dev environment** (`./gradlew runClient`)
    with portal rendering left in its current stubbed/no-op state, to establish a
    working baseline and start surfacing any remaining Mixin-weave-time-only
