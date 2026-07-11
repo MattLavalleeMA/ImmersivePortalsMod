@@ -1,7 +1,11 @@
 package qouteall.q_misc_util;
 
+import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
+
 import com.google.common.collect.ImmutableMap;
 import com.mojang.logging.LogUtils;
+
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -16,15 +20,13 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.common.ClientCommonPacketListener;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.dimension.BuiltinDimensionTypes;
 import net.minecraft.world.level.dimension.DimensionType;
-import org.jetbrains.annotations.NotNull;
-import org.slf4j.Logger;
 import qouteall.imm_ptl.core.ClientWorldLoader;
 import qouteall.imm_ptl.core.McHelper;
 import qouteall.q_misc_util.dimension.DimIntIdMap;
@@ -109,7 +111,7 @@ public class MiscNetworking {
                     Registries.DIMENSION,
                     McHelper.newResourceLocation(key)
                 );
-                String dimTypeId = dimTypeTag.getString(key);
+                String dimTypeId = dimTypeTag.getStringOr(key, "");
                 ResourceKey<DimensionType> dimType = ResourceKey.create(
                     Registries.DIMENSION_TYPE,
                     McHelper.newResourceLocation(dimTypeId)

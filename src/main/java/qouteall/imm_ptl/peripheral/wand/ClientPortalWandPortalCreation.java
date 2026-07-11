@@ -316,7 +316,7 @@ public class ClientPortalWandPortalCreation {
             }
         }
         
-        VertexConsumer debugLineStripConsumer = bufferSource.getBuffer(RenderType.debugLineStrip(1));
+        VertexConsumer debugLineStripConsumer = bufferSource.getBuffer(RenderTypes.lines());
         
         // render the circle
         WithDim<Circle> renderedCircle = circle != null ?

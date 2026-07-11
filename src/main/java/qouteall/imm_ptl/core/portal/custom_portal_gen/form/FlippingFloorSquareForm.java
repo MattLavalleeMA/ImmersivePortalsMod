@@ -1,19 +1,24 @@
 package qouteall.imm_ptl.core.portal.custom_portal_gen.form;
 
-import net.minecraft.world.entity.EntitySpawnReason;
+import java.util.List;
+import java.util.function.Predicate;
+import java.util.stream.IntStream;
+
+import org.jetbrains.annotations.Nullable;
 
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
-import org.jetbrains.annotations.Nullable;
 import qouteall.imm_ptl.core.McHelper;
 import qouteall.imm_ptl.core.portal.PortalExtension;
 import qouteall.imm_ptl.core.portal.PortalManipulation;
@@ -25,10 +30,6 @@ import qouteall.imm_ptl.core.portal.nether_portal.GeneralBreakablePortal;
 import qouteall.imm_ptl.core.portal.nether_portal.NetherPortalGeneration;
 import qouteall.q_misc_util.my_util.DQuaternion;
 import qouteall.q_misc_util.my_util.IntBox;
-
-import java.util.List;
-import java.util.function.Predicate;
-import java.util.stream.IntStream;
 
 public class FlippingFloorSquareForm extends PortalGenForm {
     
@@ -165,7 +166,7 @@ public class FlippingFloorSquareForm extends PortalGenForm {
             .filter(intBox -> intBox.stream().allMatch(
                 pos -> {
                     BlockState blockState = toWorld.getBlockState(pos);
-                    return !blockState.isSolidRender(toWorld, pos) &&
+                    return !blockState.isSolidRender() &&
                         blockState.getBlock() != PortalPlaceholderBlock.instance &&
                         blockState.getFluidState().isEmpty();
                 }

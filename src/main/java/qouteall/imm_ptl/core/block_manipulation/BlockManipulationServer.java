@@ -1,6 +1,14 @@
 package qouteall.imm_ptl.core.block_manipulation;
 
+import java.util.List;
+import java.util.function.Predicate;
+
+import org.apache.commons.lang3.Validate;
+import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
+
 import com.mojang.logging.LogUtils;
+
 import net.fabricmc.fabric.api.event.Event;
 import net.fabricmc.fabric.api.event.EventFactory;
 import net.minecraft.core.BlockPos;
@@ -23,9 +31,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import org.apache.commons.lang3.Validate;
-import org.jetbrains.annotations.Nullable;
-import org.slf4j.Logger;
 import qouteall.imm_ptl.core.IPGlobal;
 import qouteall.imm_ptl.core.IPMcHelper;
 import qouteall.imm_ptl.core.ScaleUtils;
@@ -34,9 +39,6 @@ import qouteall.imm_ptl.core.network.PacketRedirection;
 import qouteall.imm_ptl.core.portal.Portal;
 import qouteall.imm_ptl.core.portal.PortalUtils;
 import qouteall.imm_ptl.core.portal.global_portals.GlobalPortalStorage;
-
-import java.util.List;
-import java.util.function.Predicate;
 
 @SuppressWarnings("resource")
 public class BlockManipulationServer {
@@ -264,7 +266,8 @@ public class BlockManipulationServer {
                 hand,
                 blockHitResult
             );
-            if (actionResult.shouldSwing()) {
+            if (actionResult instanceof InteractionResult.Success success
+                && success.swingSource() == InteractionResult.SwingSource.SERVER) {
                 player.swing(hand, true);
             }
         }

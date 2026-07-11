@@ -1,6 +1,12 @@
 package qouteall.imm_ptl.peripheral.portal_generation;
 
+import java.util.ArrayList;
+import java.util.Optional;
+
+import org.jetbrains.annotations.Nullable;
+
 import com.google.common.collect.Lists;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceKey;
@@ -9,13 +15,9 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.portal.PortalShape;
-import org.jetbrains.annotations.Nullable;
 import qouteall.imm_ptl.core.IPGlobal;
 import qouteall.imm_ptl.core.McHelper;
 import qouteall.imm_ptl.core.portal.custom_portal_gen.CustomPortalGeneration;
-
-import java.util.ArrayList;
-import java.util.Optional;
 
 public class IntrinsicPortalGeneration {
     public static final IntrinsicNetherPortalForm intrinsicNetherPortalForm =
@@ -131,7 +133,7 @@ public class IntrinsicPortalGeneration {
         }
         
         PortalShape areaHelper = newPortal.get();
-        areaHelper.createPortalBlocks();
+        areaHelper.createPortalBlocks(world);
         return true;
     }
 }

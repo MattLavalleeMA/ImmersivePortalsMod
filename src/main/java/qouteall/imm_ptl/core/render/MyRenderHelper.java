@@ -201,6 +201,16 @@ public class MyRenderHelper {
      * If we don't do this
      * the future created in {@link SectionRenderDispatcher#uploadSectionLayer}
      * may never complete
+     *
+     * TODO MC 26.1: {@code SectionRenderDispatcher.uploadAllPendingUploads()} was removed
+     * with no direct replacement (confirmed via javap -- the per-section async-upload-future
+     * pumping concept from the old chunk-render pipeline doesn't appear to exist anymore in
+     * the new one, which reworked chunk section compiling/uploading around
+     * {@code RenderRegionCache}/{@code SectionCompiler}/{@code SectionMesh}). Stubbed as a
+     * no-op for now (this was only a workaround for non-actively-rendered dimensions'
+     * section uploads potentially stalling, gated behind the {@code IPCGlobal.earlyRemoteUpload}
+     * debug toggle) -- needs real in-game testing across dimensions to confirm whether the
+     * new pipeline still has this problem at all, and if so, what the equivalent fix is.
      */
     public static void earlyRemoteUpload() {
         if (!ClientWorldLoader.getIsInitialized()) {
@@ -209,7 +219,7 @@ public class MyRenderHelper {
         
         ClientWorldLoader.WORLD_RENDERER_MAP.forEach((dim, worldRenderer) -> {
             if (client.level.dimension() != dim) {
-                worldRenderer.getSectionRenderDispatcher().uploadAllPendingUploads();
+                // TODO MC 26.1: no replacement found for uploadAllPendingUploads(); see above
             }
         });
     }

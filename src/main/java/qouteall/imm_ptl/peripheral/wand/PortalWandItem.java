@@ -1,7 +1,12 @@
 package qouteall.imm_ptl.peripheral.wand;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Consumer;
+
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.serialization.Codec;
+
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -29,10 +34,6 @@ import net.minecraft.world.level.Level;
 import qouteall.imm_ptl.core.IPCGlobal;
 import qouteall.imm_ptl.core.IPMcHelper;
 import qouteall.imm_ptl.core.block_manipulation.BlockManipulationServer;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.function.Consumer;
 
 public class PortalWandItem extends Item {
     public static final PortalWandItem instance = new PortalWandItem(new Properties());
@@ -99,7 +100,7 @@ public class PortalWandItem extends Item {
         public static final Mode FALLBACK = CREATE_PORTAL;
         
         public static Mode fromTag(CompoundTag tag) {
-            String mode = tag.getString("mode");
+            String mode = tag.getStringOr("mode", "");
             
             return fromStr(mode);
         }

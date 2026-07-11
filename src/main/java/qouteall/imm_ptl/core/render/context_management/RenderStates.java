@@ -2,6 +2,7 @@ package qouteall.imm_ptl.core.render.context_management;
 
 import com.mojang.logging.LogUtils;
 import net.minecraft.client.Camera;
+import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.particle.Particle;
@@ -253,6 +254,34 @@ public class RenderStates {
      */
     public static float getPartialTick() {
         return partialTick;
+    }
+    
+    /**
+     * TODO MC 26.1: {@code Camera.setup(BlockGetter, Entity, boolean, boolean, float)}
+     * was replaced by {@code Camera.setLevel(ClientLevel)}/{@code .setEntity(Entity)}
+     * followed by {@code .update(DeltaTracker)} (which reads detached/mirrored state
+     * from {@code Minecraft.options.getCameraType()} itself rather than taking explicit
+     * booleans). This wraps a fixed partial-tick value into a {@link DeltaTracker} so
+     * call sites that previously passed an explicit partial tick to {@code setup(...)}
+     * can still drive {@code update(...)} the same way.
+     */
+    public static DeltaTracker fixedDeltaTracker(float partialTick) {
+        return new DeltaTracker() {
+            @Override
+            public float getGameTimeDeltaTicks() {
+                return 0;
+            }
+            
+            @Override
+            public float getGameTimeDeltaPartialTick(boolean useLastFrame) {
+                return partialTick;
+            }
+            
+            @Override
+            public float getRealtimeDeltaTicks() {
+                return 0;
+            }
+        };
     }
     
     public static List<String> collectDebugText() {

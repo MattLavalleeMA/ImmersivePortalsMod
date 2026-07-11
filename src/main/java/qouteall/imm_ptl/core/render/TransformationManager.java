@@ -1,6 +1,12 @@
 package qouteall.imm_ptl.core.render;
 
+import org.jetbrains.annotations.Nullable;
+import org.joml.Matrix4f;
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
+
 import com.mojang.blaze3d.vertex.PoseStack;
+
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Camera;
@@ -9,10 +15,6 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.Direction;
 import net.minecraft.util.Tuple;
 import net.minecraft.world.phys.Vec3;
-import org.jetbrains.annotations.Nullable;
-import org.joml.Matrix4f;
-import org.joml.Quaternionf;
-import org.joml.Vector3f;
 import qouteall.imm_ptl.core.compat.GravityChangerInterface;
 import qouteall.imm_ptl.core.portal.Portal;
 import qouteall.imm_ptl.core.render.context_management.RenderStates;
@@ -229,13 +231,9 @@ public class TransformationManager {
     
     private static void updateCamera(Minecraft client) {
         Camera camera = client.gameRenderer.getMainCamera();
-        camera.setup(
-            client.level,
-            client.player,
-            !client.options.getCameraType().isFirstPerson(),
-            client.options.getCameraType().isMirrored(),
-            RenderStates.getPartialTick()
-        );
+        camera.setLevel(client.level);
+        camera.setEntity(client.player);
+        camera.update(RenderStates.fixedDeltaTracker(RenderStates.getPartialTick()));
     }
     
     public static Matrix4f getMirrorTransformation(Vec3 normal) {

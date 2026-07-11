@@ -958,7 +958,7 @@ public class ClientPortalWandPortalDrag {
             renderWidthHeightLineSegment(matrixStack, cameraPos, vertexConsumer, rect);
         }
         
-        VertexConsumer debugLineStripConsumer = bufferSource.getBuffer(RenderType.debugLineStrip(1));
+        VertexConsumer debugLineStripConsumer = bufferSource.getBuffer(RenderTypes.lines());
         
         RenderedPlane plane = renderedPlane.getCurrent();
         if (plane != null && plane.plane() != null && plane.plane().dimension() == currDim) {

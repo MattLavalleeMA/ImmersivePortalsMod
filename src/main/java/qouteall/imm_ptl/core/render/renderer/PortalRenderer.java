@@ -1,7 +1,16 @@
 package qouteall.imm_ptl.core.render.renderer;
 
+import java.util.Comparator;
+import java.util.List;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
+
+import org.jetbrains.annotations.Nullable;
+import org.joml.Matrix4f;
+import org.joml.Quaternionf;
+
 import com.mojang.blaze3d.opengl.GlStateManager;
-import com.mojang.blaze3d.systems.RenderSystem;
+
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import net.fabricmc.fabric.api.event.Event;
 import net.fabricmc.fabric.api.event.EventFactory;
@@ -11,9 +20,6 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.Vec3;
-import org.jetbrains.annotations.Nullable;
-import org.joml.Matrix4f;
-import org.joml.Quaternionf;
 import qouteall.imm_ptl.core.CHelper;
 import qouteall.imm_ptl.core.ClientWorldLoader;
 import qouteall.imm_ptl.core.IPCGlobal;
@@ -33,11 +39,6 @@ import qouteall.imm_ptl.core.render.context_management.PortalRendering;
 import qouteall.imm_ptl.core.render.context_management.RenderStates;
 import qouteall.imm_ptl.core.render.context_management.WorldRenderInfo;
 import qouteall.q_misc_util.Helper;
-
-import java.util.Comparator;
-import java.util.List;
-import java.util.function.Predicate;
-import java.util.function.Supplier;
 
 public abstract class PortalRenderer {
     
@@ -87,7 +88,8 @@ public abstract class PortalRenderer {
         Supplier<Frustum> frustumSupplier = Helper.cached(() -> {
             Frustum frustum = new Frustum(
                 modelView,
-                RenderSystem.getProjectionMatrix()
+                RenderStates.basicProjectionMatrix != null
+                    ? RenderStates.basicProjectionMatrix : new Matrix4f()
             );
             
             Vec3 cameraPos = client.gameRenderer.getMainCamera().position();

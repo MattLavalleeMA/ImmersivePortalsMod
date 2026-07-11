@@ -1,6 +1,7 @@
 package qouteall.imm_ptl.core.render;
 
 import com.mojang.datafixers.util.Pair;
+
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.Entity;
@@ -38,12 +39,9 @@ public class CrossPortalViewRendering {
         float lastCameraY = ((IECamera) RenderStates.originalCamera).ip_getLastCameraY();
         ((IECamera) camera1).ip_setCameraY(cameraY, lastCameraY);
         Camera camera = camera1;
-        camera.setup(
-            client.level, cameraEntity,
-            isThirdPerson(),
-            isFrontView(),
-            RenderStates.getPartialTick()
-        );
+        camera.setLevel(client.level);
+        camera.setEntity(cameraEntity);
+        camera.update(RenderStates.fixedDeltaTracker(RenderStates.getPartialTick()));
     
         Vec3 realCameraPos = camera.position();
         Vec3 isometricAdjustedOriginalCameraPos =

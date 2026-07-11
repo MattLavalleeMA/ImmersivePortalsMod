@@ -6,6 +6,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
@@ -153,9 +154,11 @@ public class ScaleUtils {
         
         if (!entity.level().isClientSide() && isScaleIllegal(newScale)) {
             newScale = 1;
-            entity.sendSystemMessage(
-                Component.literal("Scale out of range")
-            );
+            if (entity instanceof ServerPlayer serverPlayer) {
+                serverPlayer.sendSystemMessage(
+                    Component.literal("Scale out of range")
+                );
+            }
         }
         
         ScaleUtils.setIPortalScaling(entity, newScale);

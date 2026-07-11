@@ -583,6 +583,70 @@ getters (mechanical, low-risk). Concretely, in `Portal.java`:
   `RenderTarget.resize(w, h, boolean)` → `resize(w, h)` (2-arg, no OS-specific flag
   anymore) in `IPPortingLibCompat.java`/`MixinRenderTarget.java`.
 - **`Camera.getPosition()`** renamed to **`Camera.position()`** (`BlockManipulationClient.java`).
+- **`RenderType.debugLineStrip(int)`** removed — replaced with `RenderTypes.lines()`
+  (the same pattern already used elsewhere for the primary vertex consumer) in
+  `ClientPortalWandPortalCreation.java`/`ClientPortalWandPortalDrag.java`.
+- **`CompoundTag.getString(String)`** now returns `Optional<String>` — use the
+  direct default-value overload `getStringOr(String, String)` instead
+  (`PortalWandItem.java`, `MiscNetworking.java`).
+- **`InteractionResult.shouldSwing()`** removed — new idiom (confirmed via
+  decompiled `ServerGamePacketListenerImpl.java`) is
+  `result instanceof InteractionResult.Success success && success.swingSource() ==
+  InteractionResult.SwingSource.SERVER` (`BlockManipulationServer.java`).
+- **`RenderSystem.getProjectionMatrix()`** removed (now GPU-UBO-driven) — reused
+  the mod's own mixin-captured `RenderStates.basicProjectionMatrix` static field
+  with a null-safe fallback (`PortalRenderer.java`).
+- **`Player` constructor** changed from `(Level, BlockPos, float, GameProfile)` to
+  `(Level, GameProfile)` — spawn-position params dropped entirely from the ctor
+  chain (`MixinServerPlayer.java`).
+- **`BlockStateBase.isSolidRender(BlockGetter, BlockPos)`** → no-arg
+  `isSolidRender()` (`FlippingFloorSquareForm.java`).
+- **Cloth Config 26.1.154 API redesign**: `AutoConfig.getConfigScreen(Class,
+  Screen)` fully removed; build the screen via `new ConfigScreenProvider<>(
+  configManager, guiRegistryAccess, parentScreen).get()`, where `configManager`
+  comes from casting `AutoConfig.getConfigHolder(Class)`'s result to
+  `ConfigManager<T>` (safe — it's the only implementer), and `guiRegistryAccess`
+  is `DefaultGuiProviders.apply(new GuiRegistry())`. `IPConfigGUI.java` rewritten.
+- **`PortalShape.createPortalBlocks()`** → `createPortalBlocks(LevelAccessor)`
+  (`IntrinsicPortalGeneration.java`).
+- **`Camera.setup(Level, Entity, boolean, boolean, float)`** removed entirely —
+  replaced with `camera.setLevel(level)` + `camera.setEntity(entity)` +
+  `camera.update(DeltaTracker)`; the new `Camera.update()` internally derives
+  detached/mirrored state from `Minecraft.options.getCameraType()`, which is
+  exactly what the mod's own `isThirdPerson()`/`isFrontView()` helpers already
+  compute, so this is behavior-preserving. Added a small
+  `RenderStates.fixedDeltaTracker(float)` helper (wraps a fixed partial-tick
+  float into a `DeltaTracker`, since no built-in factory exists for that) —
+  applied in `CrossPortalViewRendering.java`/`TransformationManager.java`.
+- **`GameRenderer.getDarkenWorldAmount(float)`** renamed to
+  `getBossOverlayWorldDarkening(float)` (confirmed via
+  `GameRenderer.extractCamera()`'s real call site), and
+  **`FogRenderer.setupColor(Camera, float, ClientLevel, int, float)`** (static,
+  void) removed — replaced by instance method `FogRenderer.setupFog(Camera, int,
+  DeltaTracker, float, ClientLevel)`, which returns a `FogData` object with the
+  color already computed as a `Vector4f` field. Added a lazily-created cached
+  `FogRenderer` instance to avoid leaking GPU buffers on repeated calls
+  (`FogRendererContext.java`). Note: this fixes only the cross-dimension
+  fog-color *query* path — the separate *live current-world* fog-color-swap
+  mechanism (`RendererUsingStencil.java`'s `getCurrentFogColor`) still depends on
+  the now-weave-broken `MixinFogRenderer.java` and needs its own redesign (see
+  "Priority order for next session(s)" below).
+- **`sendSystemMessage(Component)`** only exists on `ServerPlayer`, not generic
+  `Entity` — guarded with `instanceof ServerPlayer` in `ScaleUtils.java` (which
+  operates on generic `Entity`, not always a player).
+- **`SectionRenderDispatcher.uploadAllPendingUploads()`** removed with no
+  replacement found (confirmed via javap — the whole per-section async-upload-
+  future-pumping concept appears absent from the reworked chunk-render
+  pipeline). Stubbed as a no-op with a `TODO` in `MyRenderHelper.java`'s
+  `earlyRemoteUpload()` (gated behind the optional `IPCGlobal.earlyRemoteUpload`
+  debug toggle, so low-risk).
+
+**With this round, every genuinely mechanical/in-repo-fixable compile-error
+cluster is done: 91 → 61 errors, and every one of the 61 remaining errors is
+confined to the 7 known DimLib-/GravityChanger-blocked files** (confirmed by
+listing distinct files across all remaining error groups). See "Priority order
+for next session(s)" below for what's left (external blockers + a few
+newly-discovered weave-time-only issues, not compile errors).
 
 ## Blocking / external dependency issues
 
@@ -902,12 +966,72 @@ investigated.)
 
 ### Priority order for next session(s) (established after a full-landscape review)
 
-As of the latest run: **91 errors / 31 distinct symbols** (down from 665/152 true
-baseline — a 86% reduction). Full changelog of completed rounds is below the
-priority list (kept out of the priority list itself since none of it is
-still-to-do). **The priority list further down is the only part of this
-sub-section that reflects actual remaining work — everything above it is a
-completed-work changelog, kept for reference/context only.**
+As of the latest run: **61 errors / 18 distinct symbols**, all confined to the 7
+known-blocked files (down from 665/152 true baseline — a 91% reduction). **Every
+genuinely mechanical/in-repo-fixable compile-error cluster is now done** — the
+remaining errors are exclusively `GravityChangerInterface.java` (10+4+2+2+2+2=22
+errors, archived/dead upstream dependency, disabled by default) and
+`AlternateDimensions.java`/`EntitySync.java`/`ImmPtlChunkTickets.java`/
+`ImmPtlChunkTracking.java`/`ClientWorldLoader.java`/`GlobalPortalStorage.java`
+(39 errors, all DimLib-blocked — see "Blocking / external dependency issues"
+above). Full changelog of completed rounds is below the priority list (kept out
+of the priority list itself since none of it is still-to-do). **The priority
+list further down is the only part of this sub-section that reflects actual
+remaining work — everything above it is a completed-work changelog, kept for
+reference/context only.**
+
+**Newly-discovered weave-time-only / runtime-only issues found while closing out
+the last mechanical batch (not compile errors, so not in the count above):**
+
+- **`MixinCamera.java`'s `@Inject` targeting `Camera.setup(BlockGetter,Entity,
+  boolean,boolean,float)`**: that method overload no longer exists (`Camera` was
+  reworked around `update(DeltaTracker)`, which reads detached/mirrored state
+  directly from `Minecraft.options.getCameraType()` instead of taking explicit
+  booleans — confirmed via decompiled source). The 2 real call sites that used to
+  call `Camera.setup(...)` directly (`CrossPortalViewRendering.java`,
+  `TransformationManager.java`) were fixed by calling `.setLevel(...)`/
+  `.setEntity(...)` then `.update(RenderStates.fixedDeltaTracker(partialTick))`
+  instead (a new small helper added to `RenderStates` that wraps a fixed partial
+  tick into a `DeltaTracker`) — this produces identical behavior since the mod's
+  own `isThirdPerson()`/`isFrontView()` helpers already just read
+  `client.options.getCameraType()` the same way `Camera` does internally now, so
+  nothing was actually lost. `MixinCamera.java`'s injection target string itself
+  still references the removed overload though, so it will silently fail to
+  weave — needs updating to target `update(DeltaTracker)` instead (same category
+  as the already-tracked `MixinGameRenderer` item below).
+- **`MixinFogRenderer.java` (`multiworld_awareness` package) `@Shadow`s 6 static
+  fields (`fogRed`/`fogGreen`/`fogBlue`/`targetBiomeFog`/`previousBiomeFog`/
+  `biomeChangedTime`) that no longer exist on `FogRenderer` at all** (confirmed
+  via `javap --private` — `FogRenderer` is now instance-based with GPU-buffer-
+  backed fog data, no mutable static color state to shadow). This mixin will fail
+  to weave. `FogRendererContext.getFogColorOf(...)` (the one caller that had an
+  actual compile error from this cluster, via the now-removed
+  `FogRenderer.setupColor(...)` static method) was fixed independently by calling
+  the new instance method `FogRenderer#setupFog(Camera,int,DeltaTracker,float,
+  ClientLevel)` directly (returns a `FogData` with the color already computed, via
+  a lazily-created cached `FogRenderer` instance in `FogRendererContext` itself)
+  — bypassing the broken static-field-shadowing mechanism entirely for that call
+  site. `getDarkenWorldAmount(float)` → `getBossOverlayWorldDarkening(float)`
+  confirmed as the exact 1:1 rename via `GameRenderer.extractCamera`'s real call
+  site. **Not yet fixed**: `RendererUsingStencil.java`'s separate call to
+  `FogRendererContext.getCurrentFogColor.get()` (reads the *actual current*
+  world's live fog color via the same broken static-field-swap mechanism, a
+  different use case from the cross-dimension query above) — this one has no
+  compile error today (it only references the mod's own `Supplier<Vec3>` field)
+  but is runtime-broken since the underlying mixin won't weave. Needs a real
+  redesign of the whole `StaticFieldsSwappingManager`-based cross-dimension fog
+  color swapping scheme against the new instance/GPU-buffer `FogRenderer`, with
+  real in-game testing — same category as the portal-rendering-algorithm
+  redesign (item 2 below).
+- **`SectionRenderDispatcher.uploadAllPendingUploads()` removed with no
+  replacement found** (confirmed via javap — the whole per-section async-upload-
+  future-pumping concept from the old chunk pipeline doesn't appear to exist in
+  the new `RenderRegionCache`/`SectionCompiler`/`SectionMesh`-based one).
+  `MyRenderHelper.earlyRemoteUpload()` (a workaround for non-actively-rendered
+  dimensions' chunk-section uploads potentially stalling, gated behind the
+  `IPCGlobal.earlyRemoteUpload` debug toggle) stubbed to a no-op for now — needs
+  real in-game testing across dimensions to see whether the new pipeline still
+  has the original problem at all.
 
 **Priority order for remaining work:**
 
@@ -927,30 +1051,34 @@ completed-work changelog, kept for reference/context only.**
    vanilla debug-drawing helpers turn out to be missing elsewhere, the real Gizmo
    API should be investigated properly instead of continuing to hand-roll
    replacements one at a time.
-3. **Leave for absolute last (confirmed external/blocked, not in-repo fixable)**:
-   `GravityChangerInterface.java` (16 errors, archived/dead upstream dependency,
-   disabled by default) and `AlternateDimensions.java` (16 errors, blocked on the
-   `DimLib` migration — see "Blocking / external dependency issues" above). Also
-   confirmed the same DimLib root cause now affects 4 more files thought to be
-   independently fixable: `EntitySync.java` (1 error), `ImmPtlChunkTickets.java`
-   (1 error, its *other* error — the `Identifier.of` one — was independently
-   mechanical and already fixed), `ImmPtlChunkTracking.java` (1 error), and
-   `ClientWorldLoader.java` (1 error, its `DimensionAPI.CLIENT_DIMENSION_UPDATE_EVENT
-   .register(...)` call — all its *other* errors were independently mechanical and
-   already fixed) — all register a `qouteall.dimlib.api.DimensionAPI` event whose
-   functional-interface parameter type is DimLib's own stale-mappings-compiled
-   `ServerLevel`, causing an
+3. **`MixinCamera.java`/`MixinFogRenderer.java` weave-time-only breakage (newly
+   discovered this round, not compile errors)**: see the two bullets above (under
+   "Newly-discovered weave-time-only / runtime-only issues") for full details.
+   `MixinCamera.java`'s injection target string needs updating to
+   `Camera.update(DeltaTracker)`; `MixinFogRenderer.java`'s cross-dimension fog
+   color swap needs a real redesign against the new instance/GPU-buffer
+   `FogRenderer` (`RendererUsingStencil.java`'s `getCurrentFogColor` use is the
+   one remaining caller depending on it).
+4. **Leave for absolute last (confirmed external/blocked, not in-repo fixable)**:
+   `GravityChangerInterface.java` (22 errors, archived/dead upstream dependency,
+   disabled by default) and `AlternateDimensions.java`/`EntitySync.java`/
+   `ImmPtlChunkTickets.java`/`ImmPtlChunkTracking.java`/`ClientWorldLoader.java`/
+   `GlobalPortalStorage.java` (39 errors total, all blocked on the `DimLib`
+   migration — see "Blocking / external dependency issues" above). All the
+   DimLib-blocked files hit the same root cause: they register a
+   `qouteall.dimlib.api.DimensionAPI` event whose functional-interface parameter
+   type is DimLib's own stale-mappings-compiled `ServerLevel`, causing an
    "invalid method reference"/"cannot access class_3218" against our real
    `ServerLevel`-typed handler methods. Grep for `qouteall.dimlib` imports to find
    more of these proactively rather than waiting for them to surface one at a time.
 
 **With this round, every genuinely mechanical/in-repo-fixable compile-error cluster
-is done.** The only compile errors left (91) are: confirmed-external/DimLib-blocked
-(items above, ~36 errors) and the still-stubbed portal-rendering-pipeline pieces
-tracked under item 2 below (runtime work, not compile-error-driven anymore per its
-own section). Re-run `parse_compile_errors.py --run` to confirm before starting a
-new session — the remaining count should now be dominated by external blockers
-rather than in-repo work.
+is done.** The only compile errors left (61) are confirmed-external/DimLib-blocked
+(items above). The still-stubbed portal-rendering-pipeline pieces tracked under
+item 2 below (runtime work, not compile-error-driven anymore per its own section)
+and the newly-found weave-time-only issues (item 3 above) are separate from the
+compile-error count entirely. Re-run `parse_compile_errors.py --run` to confirm
+before starting a new session.
 
 Re-run `parse_compile_errors.py --run` after each batch, and always diff the
 touched-file error list before/after (as done every round so far) to catch
@@ -1431,28 +1559,27 @@ Scripts live in `migration_tools/` (pure Python stdlib, no pip packages needed):
 
 ## Next steps
 
-1. **Tackle item 1 (post-`ValueInput`/`ValueOutput` cleanup wave)** — the newly
-   surfaced 201-error/34-symbol batch. Start with the `.location()`→`.identifier()`
-   sweep (46 errors, purely mechanical, proven-safe rename), then the `ChunkPos`
-   private-field/`asLong`/`toLong` cluster (40 errors) and `getProfiler()` removal (28
-   errors) — those three account for well over half the remaining errors. Full
-   category breakdown is in "Remaining work" item 1 above.
-2. Re-run `parse_compile_errors.py --run` after each sub-batch (fixing smaller/more
-   mechanical categories first shrinks and clarifies what's left, same pattern that
-   worked for every previous cluster in this migration).
-3. Fix the small leftover item 4 (`ExampleGuiPortalRendering.java`'s 2 remaining
-   `keyPressed`/`KeyMapping.matches` call sites) — quick, isolated.
-4. Re-run `fabric.mod.json` / `*.mixins.json` metadata cleanup once the rest of the
-   code compiles.
-5. **Before attempting item 2 (portal rendering algorithm redesign):** get the mod to
-   actually launch in a dev environment (`./gradlew runClient`) with portal rendering
-   left in its current stubbed/no-op state, to establish a working baseline and start
-   surfacing the Mixin-weave-time-only-verifiable issues (the ~8 disabled
-   `MixinLevelRenderer` hooks, the `setupRender`-targeting hooks that reference a
-   confirmed-removed method) that `compileJava` cannot catch. Only after that baseline
-   works should the stencil-masking algorithm (direction already chosen, see item 2
-   above) and clip-plane uniform system be redesigned, since both need real in-game
-   visual feedback to get right — reference Distant Horizons' `common/.../render/blaze/`
+1. **All genuinely in-repo-fixable compile errors are done.** The only compile
+   errors left (61 across 18 symbols) are confirmed-external/DimLib-blocked — see
+   "Priority order for next session(s)" above, item 4. Re-run
+   `parse_compile_errors.py --run` at the start of the next session to confirm
+   this hasn't regressed.
+2. **Fix the newly-discovered weave-time-only issues** before attempting a dev
+   client launch, since these will otherwise surface as confusing runtime Mixin
+   errors rather than compile errors: `MixinCamera.java`'s injection target
+   (still references the removed `Camera.setup(...)` overload) and
+   `MixinGameRenderer.java`'s hand-rendering hooks (item 1 in the priority list
+   above). `MixinFogRenderer.java`'s cross-dimension fog-color-swap redesign
+   (item 3) can likely wait until real in-game testing is possible, since it's
+   only reachable through the still-stubbed stencil-portal-rendering path.
+3. **Get the mod to actually launch in a dev environment** (`./gradlew runClient`)
+   with portal rendering left in its current stubbed/no-op state, to establish a
+   working baseline and start surfacing any remaining Mixin-weave-time-only
+   issues that `compileJava` cannot catch.
+4. Only after that baseline works should the stencil-masking algorithm (direction
+   already chosen, see item 2 above) and clip-plane uniform system be redesigned,
+   since both need real in-game visual feedback to get right — reference Distant
+   Horizons' `common/.../render/blaze/`
    wrapper package throughout.
 
 
