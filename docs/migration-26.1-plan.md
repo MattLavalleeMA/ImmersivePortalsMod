@@ -732,9 +732,24 @@ its migration too.
    the feature flag is off) rather than attempting a real fork/migration of
    GravityChanger too — still an open decision, not yet made.
 
-## Remaining work
+## Changelog & remaining work
 
-### 1. Post-`ValueInput`/`ValueOutput` cleanup wave — large batch DONE, tail remains
+**Reading guide (added because completed work has twice ended up mislabeled as
+"remaining" here — read this before trusting any sub-heading's title verbatim):**
+- Section 1 immediately below is a **changelog only** — every item in it,
+  including its own "tail", is DONE. Nothing in section 1 is open work.
+- "Priority order for next session(s)" is *mostly* changelog too; only its
+  final numbered priority list (near the end of that sub-section) is live.
+- "2. Portal rendering algorithm redesign" is genuinely open.
+- "3. Entity render-state pattern" is DONE (see section 1's `LoadingIndicatorRenderer`
+  /`PortalEntityRenderer` entry) — kept only as a historical pointer, not open work.
+- "4. Small leftover items" has one open sub-item (`fabric.mod.json` /
+  `*.mixins.json` version bumps); the `ExampleGuiPortalRendering.java` bullet
+  that used to be here is DONE and has been removed.
+- The single, authoritative "what to actually work on next" list is the current
+  **## Next steps** section at the bottom of this document.
+
+### 1. Post-`ValueInput`/`ValueOutput` cleanup wave — DONE (changelog only)
 
 Item 1 from the previous revision of this doc (the `ValueInput`/`ValueOutput`
 save-data rewrite) is **DONE**. The large wave of newly-surfaced errors it unmasked
@@ -1585,23 +1600,23 @@ Remaining items in this cluster:
   moved into `extractLevel`/`prepareChunkRenders` (the new CPU-extract phase) but this
   needs dedicated research.
 
-### 3. Entity render-state pattern
+### 3. Entity render-state pattern — DONE (changelog only)
 
 `EntityRenderer<T>` → `EntityRenderer<T, S>` (same render-state-object family as
-`Screen.extractRenderState` and `Lightmap.render(LightmapRenderState)`). Affects
-`LoadingIndicatorRenderer.java` and `PortalEntityRenderer.java`. Needs the same kind
-of render-state redesign as item 2 above — not yet investigated in depth. (Also now
-listed as one of the error categories under item 1 above since it was part of the same
-compile-error batch — investigate together.)
+`Screen.extractRenderState` and `Lightmap.render(LightmapRenderState)`). Affected
+`LoadingIndicatorRenderer.java` and `PortalEntityRenderer.java`. **DONE** — see
+section 1 above (the `LoadingIndicatorRenderer.java`/`PortalEntityRenderer.java`
+entry) for the full writeup of how the `createRenderState`/`extractRenderState`/
+`submit` split was applied to both classes. Portal-content drawing itself remains
+gated on item 2's runtime redesign, same as before, but that's an item-2 concern,
+not this one.
 
 ### 4. Small leftover items
 
-- `ExampleGuiPortalRendering.java`: 2 leftover call sites using the old
-  `keyPressed(int,int,int)`/`KeyMapping.matches(int,int)` shapes that weren't covered
-  by the input-event-rewrite pass done elsewhere this round — needs the same
-  `KeyEvent`-based treatment applied to `DimEntryWidget.java`/`DimListWidget.java`
-  (small, isolated fix — just 1 file, ~6 errors).
-
+Confirmed via source inspection that `ExampleGuiPortalRendering.java`'s
+`GuiPortalScreen` no longer has any `keyPressed`/`KeyMapping`-shaped call sites —
+that leftover (previously listed here) is **DONE** and has been removed from this
+list. The remaining open items:
 
 - `src/main/resources/fabric.mod.json`:
   - `"minecraft": ["1.21", "1.21.1"]` → needs to become `26.1.x`.
