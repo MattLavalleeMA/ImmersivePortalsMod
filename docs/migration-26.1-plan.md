@@ -654,13 +654,83 @@ newly-discovered weave-time-only issues, not compile errors).
   (`api` + `include`). Latest release is `v1.1.0-mc1.21.1` (Sep 2024); **no 26.1
   build exists**. This is our own library (iPortalTeam), so it needs to be migrated
   in parallel — blocks a fully working build until done. Pinned to the old version in
-  `gradle.properties` with a `TODO BLOCKING` comment.
+  `gradle.properties` with a `TODO BLOCKING` comment. **In progress as a fork** — see
+  "DimLib fork migration" subsection below for current status; tracked in a sibling
+  repo at `C:\repos\DimLib` (`MattLavalleeMA/DimLib`, `origin`/`upstream` remotes
+  configured), not in this repo.
 - **GravityChanger** (`com.github.qouteall/GravityChanger`) — upstream repo is
   **archived** (read-only since Apr 2026), last release targets mc1.20.4. Already
   disabled by default (`enable_gravity_changer=false`), non-blocking but permanently
   dead unless forked/replaced.
 - `geckolib` test dependency (`enable_geckolib=false`, off by default) — not
   investigated, low priority.
+
+### DimLib fork migration (in progress, tracked in a sibling repo)
+
+DimLib lives in its own repo (`C:\repos\DimLib`, forked to `MattLavalleeMA/DimLib`
+with `origin`/`upstream` remotes), not inside this repo — it's consumed by
+ImmersivePortalsMod as an external Gradle dependency (`dimlib_version` in
+`gradle.properties`), so it needs its own independent migration to 26.1.2 before
+the `dimlib_version` pin here can be bumped and the DimLib-blocked compile-error
+cluster (~39 errors across 6 files, see "Remaining work" below) can clear.
+
+**Scope assessment**: DimLib is small — 21 Java files, ~65KB (~1,500-2,000 lines),
+same package name (`qouteall.dimlib`) as consumed here. 9 Mixins (3 client, 6
+common — same weave-time-breakage risk category handled throughout this plan for
+ImmersivePortalsMod's own Mixins). One public API surface consumed by this repo:
+`qouteall.dimlib.api.DimensionAPI` (10KB). The DimLib-blocked compile errors
+already seen on the consuming side (`class_3218`, `class_5321`, `class_1297`,
+`class_2350`, `class_243`, `class_1937`, `class_6880`, `class_2874`, `class_5363`,
+`class_2960`, `getHolderOrThrow`) are the *same* rename categories already
+catalogued/fixed for the main mod in `renames.json` — e.g.
+`ResourceKey.location()`→`.identifier()`, `Identifier` renames, `ServerLevel`/
+registry-holder API changes — not new problem-space, just needing the same fixes
+applied to DimLib's own source.
+
+**Key simplifying fact**: MC 26.1+ ships **fully unobfuscated** — Loom no longer
+remaps anything, so no Yarn/Mojang/Parchment mappings dependency is needed or
+available at all anymore (confirmed via this repo's own `build.gradle`, which
+dropped its whole `mappings loom.layered() {...}` block during the main
+migration). This applies equally to DimLib's build and significantly simplifies
+its migration too.
+
+**Progress so far**:
+1. Compared `MattLavalleeMA/DimLib`'s existing `1.21` branch against
+   `upstream/1.21.3` — confirmed `1.21.3` has genuine source changes (10 files
+   touched: `build.gradle`, `gradle.properties`, `gradle-wrapper.properties`,
+   `DimLibNetworking.java`, `DimensionImpl.java`, `DimensionTemplate.java`,
+   `DimsCommand.java`, `DynamicDimensionsImpl.java`,
+   `mixin/common/MixinMappedRegistry.java`, `fabric.mod.json`), not just a version
+   bump — so it's the better starting point for a 26.1 migration.
+2. Created a new `26.1` branch in `C:\repos\DimLib` based on `upstream/1.21.3`.
+3. **Not yet done** (next steps): update `C:\repos\DimLib\gradle.properties` on
+   the `26.1` branch to `minecraft_version=26.1.2`, `loader_version=0.19.3`,
+   `fabric_version=0.154.2+26.1.2`, `git_branch=26.1`, and **remove the
+   `yarn_mappings` line entirely** (matching ImmersivePortalsMod's own
+   `gradle.properties`, which has no mappings line at all anymore). Also update
+   `build.gradle`: bump the `fabric-loom` plugin version to `1.17.13` (matching
+   this repo), remove the `mappings loom.layered() { officialMojangMappings()
+   ... parchment(...) }` block entirely, and reconcile `modmenu_version`/
+   `midnightlib_version` against whatever 26.1-compatible builds exist on
+   Modrinth.
+4. Then compile DimLib against 26.1.2 and iterate through the resulting errors
+   the same way this plan's own migration was handled — reuse
+   `migration_tools/` (`find_candidates.py`, `inspect_class.py`, decompiled-source
+   extraction via the merged-jar's sibling `-sources.jar`) pointed at DimLib's own
+   source tree/build directory instead of this repo's.
+5. Once DimLib compiles clean for 26.1.2, decide how to consume it from
+   ImmersivePortalsMod: publish via jitpack (tag a release) or reference as a
+   local/composite Gradle build. Then bump `dimlib_version` in this repo's
+   `gradle.properties` and re-run `parse_compile_errors.py --run` here to confirm
+   the DimLib-blocked cluster (~39 errors: `AlternateDimensions.java`,
+   `EntitySync.java`, `ImmPtlChunkTickets.java`, `ImmPtlChunkTracking.java`,
+   `ClientWorldLoader.java`, `GlobalPortalStorage.java`) clears.
+6. After DimLib is resolved, GravityChanger (~22 errors, `GravityChangerInterface.java`)
+   is the only remaining blocked cluster. It's already disabled by default
+   (`enable_gravity_changer=false`), so it may be acceptable to just fence that
+   file off with a similar compile guard (e.g. excluding it from compilation when
+   the feature flag is off) rather than attempting a real fork/migration of
+   GravityChanger too — still an open decision, not yet made.
 
 ## Remaining work
 
