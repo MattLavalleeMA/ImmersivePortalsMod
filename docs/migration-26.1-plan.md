@@ -1132,17 +1132,11 @@ the last mechanical batch (not compile errors, so not in the count above):**
 **Priority order for remaining work:**
 
 1. **DimLib fork migration (top priority — actively in progress, unblocks the
-   largest remaining error cluster)**: `AlternateDimensions.java`/`EntitySync.java`/
-   `ImmPtlChunkTickets.java`/`ImmPtlChunkTracking.java`/`ClientWorldLoader.java`/
-   `GlobalPortalStorage.java` (39 errors total) are all blocked on `DimLib` — see
-   "DimLib fork migration" under "Blocking / external dependency issues" above for
-   full scope/progress/next-steps (tracked in a sibling repo at `C:\repos\DimLib`).
-   All the DimLib-blocked files hit the same root cause: they register a
-   `qouteall.dimlib.api.DimensionAPI` event whose functional-interface parameter
-   type is DimLib's own stale-mappings-compiled `ServerLevel`, causing an
-   "invalid method reference"/"cannot access class_3218" against our real
-   `ServerLevel`-typed handler methods. Grep for `qouteall.dimlib` imports to find
-   more of these proactively rather than waiting for them to surface one at a time.
+   largest remaining error cluster, 39 errors across 6 files)**: full scope,
+   root cause, progress so far, and next steps are documented in the "DimLib
+   fork migration" subsection under "Blocking / external dependency issues"
+   above — not repeated here to avoid the two going out of sync. Work is
+   tracked in a sibling repo at `C:\repos\DimLib`.
 2. **`net.minecraft.gizmos` debug-drawing system (newly discovered, not yet
    investigated)**: vanilla's old `LevelRenderer.renderLineBox(...)` convenience
    helper was removed outright (not renamed) — a `LineGizmo` class exists in a
