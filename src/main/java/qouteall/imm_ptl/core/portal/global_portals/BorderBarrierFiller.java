@@ -37,7 +37,7 @@ public class BorderBarrierFiller {
         ).findFirst().orElse(null);
         
         if (zone == null) {
-            player.displayClientMessage(Component.translatable("imm_ptl.cannot_find_zone"), false);
+            player.sendSystemMessage(Component.translatable("imm_ptl.cannot_find_zone"), false);
             return;
         }
         
@@ -58,7 +58,7 @@ public class BorderBarrierFiller {
         ).findFirst().orElse(null);
         
         if (zone == null) {
-            player.displayClientMessage(Component.translatable("imm_ptl.cannot_find_zone"), false);
+            player.sendSystemMessage(Component.translatable("imm_ptl.cannot_find_zone"), false);
             return;
         }
         
@@ -82,7 +82,7 @@ public class BorderBarrierFiller {
             // according to my test 80000 columns increase world saving by 465 MB
             double sizeEstimationGB = (totalColumns / 80000.0) * 0.5;
             
-            player.displayClientMessage(
+            player.sendSystemMessage(
                 Component.translatable(
                     "imm_ptl.clear_border_warning",
                     sizeEstimationGB < 0.01 ? 0 : sizeEstimationGB
@@ -93,13 +93,13 @@ public class BorderBarrierFiller {
         else {
             warnedPlayers.remove(player);
             
-            player.displayClientMessage(
+            player.sendSystemMessage(
                 Component.translatable("imm_ptl.start_clearing_border"),
                 false
             );
             
             
-            startFillingBorder(world, borderBox, l -> player.displayClientMessage(l, false));
+            startFillingBorder(world, borderBox, l -> player.sendSystemMessage(l, false));
         }
     }
     

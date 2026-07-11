@@ -54,8 +54,8 @@ public class PortalAPI {
         Vec3 center = boxSurface.getCenter();
         portal.setPos(center.x, center.y, center.z);
         
-        portal.setAxisW(Vec3.atLowerCornerOf(directions.getA().getNormal()));
-        portal.setAxisH(Vec3.atLowerCornerOf(directions.getB().getNormal()));
+        portal.setAxisW(new Vec3(directions.getA().getStepX(), directions.getA().getStepY(), directions.getA().getStepZ()));
+        portal.setAxisH(new Vec3(directions.getB().getStepX(), directions.getB().getStepY(), directions.getB().getStepZ()));
         portal.setWidth(Helper.getCoordinate(areaSize, directions.getA().getAxis()));
         portal.setHeight(Helper.getCoordinate(areaSize, directions.getB().getAxis()));
     }
@@ -183,7 +183,7 @@ public class PortalAPI {
         McHelper.sendToTrackers(
             entity,
             PacketRedirection.createRedirectedMessage(
-                entity.getServer(),
+                ((ServerLevel) entity.level()).getServer(),
                 entity.level().dimension(),
                 packet
             )

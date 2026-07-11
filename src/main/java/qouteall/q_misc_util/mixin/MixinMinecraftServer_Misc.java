@@ -4,10 +4,10 @@ import com.mojang.datafixers.DataFixer;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.Services;
 import net.minecraft.server.WorldStem;
-import net.minecraft.server.level.progress.ChunkProgressListener;
-import net.minecraft.server.level.progress.ChunkProgressListenerFactory;
+import net.minecraft.server.level.progress.LevelLoadListener;
 import net.minecraft.server.packs.repository.PackRepository;
 import net.minecraft.util.thread.ReentrantBlockableEventLoop;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.storage.LevelStorageSource;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -21,6 +21,7 @@ import qouteall.q_misc_util.ducks.IEMinecraftServer_Misc;
 
 import java.lang.ref.WeakReference;
 import java.net.Proxy;
+import java.util.Optional;
 import java.util.concurrent.Executor;
 
 @SuppressWarnings("rawtypes")
@@ -50,13 +51,15 @@ public abstract class MixinMinecraftServer_Misc extends ReentrantBlockableEventL
         at = @At("RETURN")
     )
     private void onConstruct(
-        Thread thread, LevelStorageSource.LevelStorageAccess levelStorageAccess, PackRepository packRepository, WorldStem worldStem, Proxy proxy, DataFixer dataFixer, Services services, ChunkProgressListenerFactory chunkProgressListenerFactory, CallbackInfo ci
+        Thread thread, LevelStorageSource.LevelStorageAccess levelStorageAccess, PackRepository packRepository, WorldStem worldStem,
+        Optional<GameRules> gameRules, Proxy proxy, DataFixer dataFixer, Services services, LevelLoadListener levelLoadListener,
+        boolean propagatesCrashes, CallbackInfo ci
     ) {
         MiscGlobals.refMinecraftServer = new WeakReference<>((MinecraftServer) ((Object) this));
     }
     
     @Inject(method = "createLevels", at = @At("RETURN"))
-    private void onWorldsCreated(ChunkProgressListener listener, CallbackInfo ci) {
+    private void onWorldsCreated(CallbackInfo ci) {
         DimensionIntId.onServerStarted((MinecraftServer) (Object) this);
     }
     

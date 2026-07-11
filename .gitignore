@@ -38,6 +38,9 @@ deps/
 
 # whatever
 logs/
+
+# migration tooling generated reports
+migration_tools/reports/
 /deps_unused/
 /deps/
 

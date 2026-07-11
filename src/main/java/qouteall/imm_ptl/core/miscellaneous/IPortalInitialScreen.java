@@ -9,7 +9,7 @@ import net.minecraft.client.gui.layouts.HeaderAndFooterLayout;
 import net.minecraft.client.gui.layouts.LinearLayout;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import qouteall.imm_ptl.core.platform_specific.IPConfig;
 
 public class IPortalInitialScreen extends Screen {
@@ -52,14 +52,14 @@ public class IPortalInitialScreen extends Screen {
         
         iconWidget = ImageWidget.texture(
             30, 30,
-            ResourceLocation.fromNamespaceAndPath("immersive_portals", "icon.png"),
+            Identifier.fromNamespaceAndPath("immersive_portals", "icon.png"),
             30, 30
         );
         
         titleWidget = new StringWidget(
             Component.translatable("iportal.initial_screen.title"),
             font
-        ).alignCenter();
+        );
         
         contentWidget = new MultiLineTextWidget(
             Component.empty(),
@@ -114,7 +114,6 @@ public class IPortalInitialScreen extends Screen {
         contentWidget.setMaxWidth(this.width - 40);
         pageNumberWidget.setWidth(50);
         pageNumberWidget.setHeight(iKnowButton.getHeight());
-        pageNumberWidget.alignCenter();
         titleWidget.setHeight(iconWidget.getHeight());
         
         addRenderableWidget(prevButton);

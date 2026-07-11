@@ -29,7 +29,7 @@ import net.minecraft.network.protocol.common.ClientCommonPacketListener;
 import net.minecraft.network.protocol.common.ServerCommonPacketListener;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -73,8 +73,8 @@ public class ImplRemoteProcedureCall {
     
     static {
         serializerMap = ImmutableMap.<Class, BiConsumer<RegistryFriendlyByteBuf, Object>>builder()
-            .put(ResourceLocation.class, (buf, o) -> buf.writeResourceLocation(((ResourceLocation) o)))
-            .put(ResourceKey.class, (buf, o) -> buf.writeResourceLocation(((ResourceKey) o).location()))
+            .put(Identifier.class, (buf, o) -> buf.writeResourceLocation(((Identifier) o)))
+            .put(ResourceKey.class, (buf, o) -> buf.writeResourceLocation(((ResourceKey) o).identifier()))
             .put(BlockPos.class, (buf, o) -> buf.writeBlockPos(((BlockPos) o)))
             .put(Vec3.class, (buf, o) -> {
                 Vec3 vec = (Vec3) o;
@@ -102,7 +102,7 @@ public class ImplRemoteProcedureCall {
             .build();
         
         deserializerMap = ImmutableMap.<Type, Function<RegistryFriendlyByteBuf, Object>>builder()
-            .put(ResourceLocation.class, FriendlyByteBuf::readResourceLocation)
+            .put(Identifier.class, FriendlyByteBuf::readResourceLocation)
             .put(
                 new TypeToken<ResourceKey<Level>>() {}.getType(),
                 buf -> ResourceKey.create(
@@ -315,11 +315,11 @@ public class ImplRemoteProcedureCall {
     }
     
     public static void init() {
-        PayloadTypeRegistry.playC2S().register(
+        PayloadTypeRegistry.serverboundPlay().register(
             C2SRPCPayload.TYPE, C2SRPCPayload.CODEC
         );
         
-        PayloadTypeRegistry.playS2C().register(
+        PayloadTypeRegistry.clientboundPlay().register(
             S2CRPCPayload.TYPE, S2CRPCPayload.CODEC
         );
         
@@ -398,7 +398,7 @@ public class ImplRemoteProcedureCall {
         String methodPath,
         Object... arguments
     ) {
-        return ServerPlayNetworking.createS2CPacket(
+        return ServerPlayNetworking.createClientboundPacket(
             new S2CRPCPayload(
                 true, methodPath, null, List.of(arguments)
             )

@@ -12,7 +12,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
@@ -95,7 +95,7 @@ public class O_O {
     
     @Nullable
     public static String getImmPtlModInfoUrl() {
-        String gameVersion = SharedConstants.getCurrentVersion().getName();
+        String gameVersion = SharedConstants.getCurrentVersion().name();
         
         if (O_O.isForge()) {
             return "https://qouteall.fun/immptl_info/forge-%s.json".formatted(gameVersion);
@@ -199,7 +199,7 @@ public class O_O {
     }
     
     @Nullable
-    public static ResourceLocation getModIconLocation(String modid) {
+    public static Identifier getModIconLocation(String modid) {
         String path = FabricLoader.getInstance().getModContainer(modid)
             .flatMap(c -> c.getMetadata().getIconPath(512))
             .orElse(null);

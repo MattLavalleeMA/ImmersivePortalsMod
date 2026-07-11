@@ -110,7 +110,7 @@ public class PlayerChunkLoading {
         }
         
         ServerGamePacketListenerImpl connection = serverPlayer.connection;
-        MinecraftServer server = serverPlayer.server;
+        MinecraftServer server = serverPlayer.level().getServer();
         
         int maxSendNum = (int) Math.floor(batchQuota);
         Validate.isTrue(maxSendNum != 0);
@@ -140,7 +140,7 @@ public class PlayerChunkLoading {
                 if (world == null) {
                     LOGGER.error(
                         "Missing dimension when flushing pending loading {}",
-                        record.dimension.location()
+                        record.dimension.identifier()
                     );
                     return true;
                 }

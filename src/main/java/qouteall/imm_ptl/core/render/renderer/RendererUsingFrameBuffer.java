@@ -1,7 +1,7 @@
 package qouteall.imm_ptl.core.render.renderer;
 
 import com.mojang.blaze3d.pipeline.RenderTarget;
-import com.mojang.blaze3d.platform.GlStateManager;
+import com.mojang.blaze3d.opengl.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.phys.Vec3;
@@ -73,20 +73,19 @@ public class RendererUsingFrameBuffer extends PortalRenderer {
         RenderTarget oldFrameBuffer = client.getMainRenderTarget();
         
         ((IEMinecraftClient) client).ip_setFrameBuffer(secondaryFrameBuffer.fb);
-        secondaryFrameBuffer.fb.bindWrite(true);
-        
-        GlStateManager._clearColor(1, 0, 1, 1);
-        GlStateManager._clearDepth(1);
-        GlStateManager._clear(
-            GL11.GL_COLOR_BUFFER_BIT | GL11.GL_DEPTH_BUFFER_BIT,
-            Minecraft.ON_OSX
-        );
+        // TODO MC 26.1: RenderTarget.bindWrite/GlStateManager._clearColor/_clearDepth no
+        // longer exist - clearing now goes through RenderSystem.getDevice()
+        // .createCommandEncoder().clearColorAndDepthTextures(...) on GpuTexture objects,
+        // and there's no "currently bound framebuffer" for vanilla draws to implicitly
+        // target anymore (see RenderSystem.outputColorTextureOverride/
+        // outputDepthTextureOverride - the sanctioned redirection mechanism, used by
+        // vanilla's own LevelRenderer.renderLevel for a similar purpose). Needs a full
+        // redesign of this secondary-framebuffer-render path; stubbed pending that.
         GL11.glDisable(GL11.GL_STENCIL_TEST);
         
         renderPortalContent(portal);
         
         ((IEMinecraftClient) client).ip_setFrameBuffer(oldFrameBuffer);
-        oldFrameBuffer.bindWrite(true);
         
         PortalRendering.popPortalLayer();
         
@@ -116,7 +115,7 @@ public class RendererUsingFrameBuffer extends PortalRenderer {
             ViewAreaRenderer.renderPortalArea(
                 portal, Vec3.ZERO,
                 modelView,
-                RenderSystem.getProjectionMatrix(),
+                new Matrix4f(), // TODO MC 26.1: RenderSystem.getProjectionMatrix() removed; renderPortalArea is stubbed anyway
                 true, true,
                 true, true
             );
@@ -128,7 +127,7 @@ public class RendererUsingFrameBuffer extends PortalRenderer {
             portal,
             secondaryFrameBuffer.fb,
             modelView,
-            RenderSystem.getProjectionMatrix()
+            new Matrix4f() // TODO MC 26.1: RenderSystem.getProjectionMatrix() removed; drawPortalAreaWithFramebuffer is stubbed anyway
         );
     }
     

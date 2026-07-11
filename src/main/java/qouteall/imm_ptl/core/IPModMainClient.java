@@ -24,7 +24,6 @@ import qouteall.imm_ptl.core.render.ImmPtlViewArea;
 import qouteall.imm_ptl.core.render.MyRenderHelper;
 import qouteall.imm_ptl.core.render.ShaderCodeTransformation;
 import qouteall.imm_ptl.core.render.VisibleSectionDiscovery;
-import qouteall.imm_ptl.core.render.context_management.CloudContext;
 import qouteall.imm_ptl.core.render.optimization.GLResourceCache;
 import qouteall.imm_ptl.core.render.optimization.SharedBlockMeshBuffers;
 import qouteall.imm_ptl.core.render.renderer.RendererUsingFrameBuffer;
@@ -93,8 +92,6 @@ public class IPModMainClient {
         CollisionHelper.initClient();
         
         PortalRenderInfo.init();
-        
-        CloudContext.init();
         
         SharedBlockMeshBuffers.init();
         

@@ -1,6 +1,8 @@
 package qouteall.imm_ptl.core.render.renderer;
 
-import com.mojang.blaze3d.platform.GlStateManager;
+import net.minecraft.util.profiling.Profiler;
+
+import com.mojang.blaze3d.opengl.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.phys.Vec3;
@@ -57,7 +59,7 @@ public class RendererUsingStencil extends PortalRenderer {
         RenderSystem.enableDepthTest();
         RenderSystem.depthMask(true);
         
-        client.getProfiler().popPush("render_portal_total");
+        Profiler.get().popPush("render_portal_total");
         renderPortals(modelView);
         if (PortalRendering.isRendering()) {
             setStencilStateForWorldRendering();
@@ -97,7 +99,11 @@ public class RendererUsingStencil extends PortalRenderer {
             }
         }
         
-        client.getMainRenderTarget().bindWrite(false);
+        client.getMainRenderTarget();
+        // TODO MC 26.1: RenderTarget.bindWrite no longer exists - see class-level TODO in
+        // ViewAreaRenderer.java. The raw stencil-buffer GL calls below need to move into
+        // a real RenderPass targeting the main render target's views once the stencil
+        // masking algorithm is redesigned.
         
         GL11.glClearStencil(0);
         GL11.glClear(GL11.GL_STENCIL_BUFFER_BIT);
@@ -130,13 +136,13 @@ public class RendererUsingStencil extends PortalRenderer {
         
         int outerPortalStencilValue = PortalRendering.getPortalLayer();
         
-        client.getProfiler().push("render_view_area");
+        Profiler.get().push("render_view_area");
         
         boolean anySamplePassed = PortalRenderInfo.renderAndDecideVisibility(portal, () -> {
             renderPortalViewAreaToStencil(portal, modelView);
         });
         
-        client.getProfiler().pop();
+        Profiler.get().pop();
         
         if (!anySamplePassed) {
             setStencilStateForWorldRendering();
@@ -148,9 +154,9 @@ public class RendererUsingStencil extends PortalRenderer {
         int thisPortalStencilValue = outerPortalStencilValue + 1;
         
         if (!portal.isFuseView()) {
-            client.getProfiler().push("clear_depth_of_view_area");
+            Profiler.get().push("clear_depth_of_view_area");
             clearDepthOfThePortalViewArea(portal);
-            client.getProfiler().pop();
+            Profiler.get().pop();
         }
         
         setStencilStateForWorldRendering();
@@ -194,7 +200,7 @@ public class RendererUsingStencil extends PortalRenderer {
         ViewAreaRenderer.renderPortalArea(
             portal, Vec3.ZERO,
             modelView,
-            RenderSystem.getProjectionMatrix(),
+            new Matrix4f(), // TODO MC 26.1: RenderSystem.getProjectionMatrix() removed; renderPortalArea is stubbed anyway
             true, true,
             true, true
         );
@@ -241,7 +247,7 @@ public class RendererUsingStencil extends PortalRenderer {
         ViewAreaRenderer.renderPortalArea(
             portal, Vec3.ZERO,
             modelView,
-            RenderSystem.getProjectionMatrix(),
+            new Matrix4f(), // TODO MC 26.1: RenderSystem.getProjectionMatrix() removed; renderPortalArea is stubbed anyway
             false, false,
             true,
             true // important: should clip, otherwise depth will be abnormal when viewing scale box from inside in portal

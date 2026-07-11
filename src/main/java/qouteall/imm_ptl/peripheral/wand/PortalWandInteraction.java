@@ -1,7 +1,10 @@
 package qouteall.imm_ptl.peripheral.wand;
 
+import net.minecraft.world.entity.EntitySpawnReason;
+
 import com.mojang.logging.LogUtils;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.minecraft.commands.Commands;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -236,7 +239,7 @@ public class PortalWandInteraction {
             }
         }
         
-        Portal portal = Portal.ENTITY_TYPE.create(McHelper.getServerWorld(firstSideDimension));
+        Portal portal = Portal.ENTITY_TYPE.create(McHelper.getServerWorld(firstSideDimension), EntitySpawnReason.TRIGGERED);
         Validate.notNull(portal);
         portal.setOriginPos(
             firstSideLeftBottom
@@ -411,7 +414,7 @@ public class PortalWandInteraction {
     }
     
     private static void handleFinishDrag(ServerPlayer player) {
-        DraggingSession session = of(player.server).draggingSessionMap.remove(player);
+        DraggingSession session = of(player.level().getServer()).draggingSessionMap.remove(player);
         
         if (session == null) {
             return;
@@ -425,7 +428,7 @@ public class PortalWandInteraction {
     }
     
     private static void handleUndoDrag(ServerPlayer player) {
-        PortalWandInteraction portalWandInteraction = of(player.server);
+        PortalWandInteraction portalWandInteraction = of(player.level().getServer());
         DraggingSession session = portalWandInteraction.draggingSessionMap.get(player);
         
         if (session == null) {
@@ -450,7 +453,7 @@ public class PortalWandInteraction {
     private static void handleDraggingRequest(
         ServerPlayer player, UUID portalId, Vec3 cursorPos, DraggingInfo draggingInfo, Portal portal
     ) {
-        PortalWandInteraction portalWandInteraction = of(player.server);
+        PortalWandInteraction portalWandInteraction = of(player.level().getServer());
         
         DraggingSession session = portalWandInteraction.draggingSessionMap.get(player);
         
@@ -522,7 +525,7 @@ public class PortalWandInteraction {
     }
     
     private static boolean canPlayerUsePortalWand(ServerPlayer player) {
-        return player.hasPermissions(2)
+        return Commands.LEVEL_GAMEMASTERS.check(player.permissions())
             || (IPGlobal.easeCreativePermission && player.isCreative())
             || (IPConfig.getConfig().portalWandUsableOnSurvivalMode
             && player.gameMode.getGameModeForPlayer() == GameType.SURVIVAL);
@@ -544,7 +547,7 @@ public class PortalWandInteraction {
     }
     
     public static boolean isDragging(ServerPlayer player) {
-        return of(player.server).draggingSessionMap.containsKey(player);
+        return of(player.level().getServer()).draggingSessionMap.containsKey(player);
     }
     
     @Nullable
@@ -816,7 +819,7 @@ public class PortalWandInteraction {
             return;
         }
         
-        Portal portal = Portal.ENTITY_TYPE.create(player.level());
+        Portal portal = Portal.ENTITY_TYPE.create(player.level(), EntitySpawnReason.TRIGGERED);
         assert portal != null;
         
         portal.readPortalDataFromNbt(copyingSession.portalData);

@@ -1,6 +1,6 @@
 package qouteall.imm_ptl.core.render.renderer;
 
-import com.mojang.blaze3d.platform.GlStateManager;
+import com.mojang.blaze3d.opengl.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.phys.Vec3;
@@ -61,12 +61,9 @@ public class RendererDebug extends PortalRenderer {
     
         PortalRendering.pushPortalLayer(portal);
         
-        GlStateManager._clearColor(1, 0, 1, 1);
-        GlStateManager._clearDepth(1);
-        GlStateManager._clear(
-            GL11.GL_COLOR_BUFFER_BIT | GL11.GL_DEPTH_BUFFER_BIT,
-            Minecraft.ON_OSX
-        );
+        // TODO MC 26.1: GlStateManager._clearColor/_clearDepth no longer exist; clearing
+        // now goes through RenderSystem.getDevice().createCommandEncoder()
+        // .clearColorAndDepthTextures(...) on GpuTexture objects. Stubbed pending redesign.
         GL11.glDisable(GL11.GL_STENCIL_TEST);
         
         renderPortalContent(portal);
@@ -82,7 +79,7 @@ public class RendererDebug extends PortalRenderer {
             ViewAreaRenderer.renderPortalArea(
                 portal, Vec3.ZERO,
                 modelView,
-                RenderSystem.getProjectionMatrix(),
+                new Matrix4f(), // TODO MC 26.1: RenderSystem.getProjectionMatrix() removed; renderPortalArea is stubbed anyway
                 true, true,
                 true, true);
         });

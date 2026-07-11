@@ -5,6 +5,7 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -35,7 +36,7 @@ public class MixinCardinalCompComponentKey {
         
         if (instance instanceof Entity entity) {
             var redirected = PacketRedirection.createRedirectedMessage(
-                entity.getServer(),
+                ((ServerLevel) entity.level()).getServer(),
                 entity.level().dimension(),
                 (Packet<ClientGamePacketListener>) (Packet) packet
             );

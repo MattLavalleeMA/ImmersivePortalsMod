@@ -1,5 +1,7 @@
 package qouteall.imm_ptl.core.portal;
 
+import net.minecraft.world.entity.EntitySpawnReason;
+
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
@@ -14,12 +16,12 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.projectile.Arrow;
+import net.minecraft.world.entity.projectile.arrow.Arrow;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.EndPortalBlock;
-import net.minecraft.world.level.dimension.end.EndDragonFight;
+import net.minecraft.world.level.dimension.end.EnderDragonFight;
 import net.minecraft.world.level.levelgen.feature.EndPlatformFeature;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -41,7 +43,7 @@ public class EndPortalEntity extends Portal {
     private static final Logger LOGGER = LogManager.getLogger(EndPortalEntity.class);
     
     public static final EntityType<EndPortalEntity> ENTITY_TYPE =
-        createPortalEntityType(EndPortalEntity::new);
+        createPortalEntityType("end_portal", EndPortalEntity::new);
     public static final String PORTAL_TAG_VIEW_BOX = "view_box";
     
     private static final double BOX_PORTAL_SIDE_LEN = 3;
@@ -88,7 +90,7 @@ public class EndPortalEntity extends Portal {
         doCreateEndPlatform(world);
         
         // update dragon fight info
-        EndDragonFight dragonFight = world.getDragonFight();
+        EnderDragonFight dragonFight = world.getDragonFight();
         if (dragonFight == null) {
             return;
         }
@@ -147,7 +149,7 @@ public class EndPortalEntity extends Portal {
         
         Vec3 portalCenter = thisSideBox.getCenter();
         
-        EndPortalEntity portal = EndPortalEntity.ENTITY_TYPE.create(world);
+        EndPortalEntity portal = EndPortalEntity.ENTITY_TYPE.create(world, EntitySpawnReason.TRIGGERED);
         assert portal != null;
         
         portal.setOriginPos(portalCenter);
@@ -263,7 +265,7 @@ public class EndPortalEntity extends Portal {
             );
         }
         
-        MinecraftServer server = getServer();
+        MinecraftServer server = ((ServerLevel) level()).getServer();
         assert server != null;
         ServerLevel endWorld = server.getLevel(Level.END);
         if (endWorld != null) {
@@ -342,7 +344,7 @@ public class EndPortalEntity extends Portal {
         if (!level().isClientSide()) {
             if (entity instanceof ServerPlayer) {
                 if (IPGlobal.endPortalMode == IPGlobal.EndPortalMode.toObsidianPlatform) {
-                    MinecraftServer server = getServer();
+                    MinecraftServer server = ((ServerLevel) level()).getServer();
                     assert server != null;
                     ServerLevel endWorld = server.getLevel(Level.END);
                     if (endWorld != null) {

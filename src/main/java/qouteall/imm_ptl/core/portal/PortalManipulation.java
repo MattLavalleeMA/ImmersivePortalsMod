@@ -1,5 +1,7 @@
 package qouteall.imm_ptl.core.portal;
 
+import net.minecraft.world.entity.EntitySpawnReason;
+
 import com.mojang.datafixers.util.Pair;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceKey;
@@ -88,7 +90,7 @@ public class PortalManipulation {
     public static <T extends Portal> T createReversePortal(Portal portal, EntityType<T> entityType) {
         Level world = portal.getDestinationWorld();
         
-        T newPortal = entityType.create(world);
+        T newPortal = entityType.create(world, EntitySpawnReason.TRIGGERED);
         assert newPortal != null;
         newPortal.setDestDim(portal.level().dimension());
         newPortal.setPos(portal.getDestPos().x, portal.getDestPos().y, portal.getDestPos().z);
@@ -131,7 +133,7 @@ public class PortalManipulation {
     
     public static <T extends Portal> T createFlippedPortal(Portal portal, EntityType<T> entityType) {
         Level world = portal.level();
-        T newPortal = entityType.create(world);
+        T newPortal = entityType.create(world, EntitySpawnReason.TRIGGERED);
         assert newPortal != null;
         newPortal.setDestDim(portal.getDestDim());
         newPortal.setPos(portal.getX(), portal.getY(), portal.getZ());
@@ -158,7 +160,7 @@ public class PortalManipulation {
     //the new portal will not be added into world
     public static Portal copyPortal(Portal portal, EntityType<Portal> entityType) {
         Level world = portal.level();
-        Portal newPortal = entityType.create(world);
+        Portal newPortal = entityType.create(world, EntitySpawnReason.TRIGGERED);
         newPortal.setDestDim(portal.getDestDim());
         newPortal.setPos(portal.getX(), portal.getY(), portal.getZ());
         newPortal.setDestination(portal.getDestPos());
@@ -253,7 +255,7 @@ public class PortalManipulation {
         Direction facing, AABB portalArea,
         Vec3 destination
     ) {
-        T portal = entityType.create(fromWorld);
+        T portal = entityType.create(fromWorld, EntitySpawnReason.TRIGGERED);
         
         PortalAPI.setPortalOrthodoxShape(portal, facing, portalArea);
         
@@ -377,8 +379,8 @@ public class PortalManipulation {
             return null;
         }
         
-        Vec3 axisH = Vec3.atLowerCornerOf(hitResult.getDirection().getNormal());
-        Vec3 axisW = axisH.cross(Vec3.atLowerCornerOf(lookingDirection.getOpposite().getNormal()));
+        Vec3 axisH = hitResult.getDirection().getUnitVec3();
+        Vec3 axisW = axisH.cross(lookingDirection.getOpposite().getUnitVec3());
         Vec3 pos = Vec3.atCenterOf(hitResult.getBlockPos())
             .add(axisH.scale(0.5 + height / 2));
         

@@ -36,7 +36,7 @@ public abstract class MixinServerPlayer extends Player implements IEServerPlayer
     
     @Override
     public void ip_startRidingWithoutTeleportRequest(Entity newVehicle) {
-        super.startRiding(newVehicle, true);
+        super.startRiding(newVehicle, true, true);
     }
     
     /**

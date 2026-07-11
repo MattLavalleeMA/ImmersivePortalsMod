@@ -3,7 +3,7 @@ package qouteall.imm_ptl.peripheral.mixin.client.alternate_dimension;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.renderer.FogRenderer;
+import net.minecraft.client.renderer.fog.FogRenderer;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -24,13 +24,13 @@ public class MixinFogRenderer_A_CVB {
         ClientLevel world = Minecraft.getInstance().level;
         if (world != null && AlternateDimensions.isAlternateDimension(world)) {
             return new Vec3(
-                camera.getPosition().x,
-                Math.max(32.0, camera.getPosition().y),
-                camera.getPosition().z
+                camera.position().x,
+                Math.max(32.0, camera.position().y),
+                camera.position().z
             );
         }
         else {
-            return camera.getPosition();
+            return camera.position();
         }
     }
 }

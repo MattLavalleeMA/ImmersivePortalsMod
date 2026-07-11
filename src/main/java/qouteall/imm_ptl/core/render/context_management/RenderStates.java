@@ -89,7 +89,7 @@ public class RenderStates {
     ) {
         ClientWorldLoader.initializeIfNeeded();
         
-        Entity cameraEntity = MyRenderHelper.client.cameraEntity;
+        Entity cameraEntity = MyRenderHelper.client.getCameraEntity();
         
         if (cameraEntity == null) {
             return;
@@ -208,9 +208,9 @@ public class RenderStates {
         Minecraft client = Minecraft.getInstance();
         IEGameRenderer gameRenderer = (IEGameRenderer) Minecraft.getInstance().gameRenderer;
         gameRenderer.ip_setLightmapTextureManager(ClientWorldLoader
-            .getDimensionRenderHelper(client.level.dimension()).lightmapTexture);
+            .getDimensionRenderHelper(client.level.dimension()).lightmap);
         
-        Vec3 currCameraPos = client.gameRenderer.getMainCamera().getPosition();
+        Vec3 currCameraPos = client.gameRenderer.getMainCamera().position();
         cameraPosDelta = currCameraPos.subtract(lastCameraPos);
         if (cameraPosDelta.lengthSqr() > 1) {
             cameraPosDelta = Vec3.ZERO;

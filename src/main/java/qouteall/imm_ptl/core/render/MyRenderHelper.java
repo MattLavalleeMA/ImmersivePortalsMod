@@ -1,24 +1,15 @@
 package qouteall.imm_ptl.core.render;
 
 import com.mojang.blaze3d.pipeline.RenderTarget;
-import com.mojang.blaze3d.platform.GlStateManager;
-import com.mojang.blaze3d.shaders.Uniform;
+import com.mojang.blaze3d.opengl.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.BufferBuilder;
-import com.mojang.blaze3d.vertex.BufferUploader;
-import com.mojang.blaze3d.vertex.DefaultVertexFormat;
-import com.mojang.blaze3d.vertex.Tesselator;
-import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.GameRenderer;
-import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceProvider;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
-import org.apache.commons.lang3.Validate;
 import org.joml.Matrix4f;
 import qouteall.imm_ptl.core.CHelper;
 import qouteall.imm_ptl.core.ClientWorldLoader;
@@ -43,7 +34,6 @@ import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
 import static org.lwjgl.opengl.GL11.GL_BACK;
-import static org.lwjgl.opengl.GL11.GL_COLOR_BUFFER_BIT;
 import static org.lwjgl.opengl.GL11.GL_DEPTH_COMPONENT;
 import static org.lwjgl.opengl.GL11.GL_FLOAT;
 import static org.lwjgl.opengl.GL11.GL_FRONT;
@@ -51,67 +41,34 @@ import static org.lwjgl.opengl.GL11.GL_RED;
 import static org.lwjgl.opengl.GL11.glCullFace;
 import static org.lwjgl.opengl.GL11.glReadPixels;
 
+// TODO MC 26.1: This class's custom immediate-mode draw helpers (portal area shader,
+// screen triangle, framebuffer-to-framebuffer blit) used ShaderInstance/Uniform/
+// BufferBuilder/BufferUploader/Tesselator, which no longer exist - shaders are now
+// compiled centrally by ShaderManager into RenderPipeline objects drawn via RenderPass/
+// GpuBuffer (see com.mojang.blaze3d.systems.RenderPass, com.mojang.blaze3d.pipeline.
+// RenderPipeline). Re-implementing these draws needs a small custom RenderPipeline +
+// GpuBuffer wrapper layer (see Distant Horizons' "Blaze" wrapper package for reference)
+// plus in-game testing - out of scope for a static-analysis-only pass. Stubbed as no-ops
+// below so the rest of the mod (and the stencil-based portal renderer scaffolding) still
+// compiles; portal content will not actually render until this is redone.
 public class MyRenderHelper {
     
     public static final Minecraft client = Minecraft.getInstance();
     
-    public static final SignalBiArged<ResourceProvider, Consumer<ShaderInstance>> loadShaderSignal =
+    public static final SignalBiArged<ResourceProvider, Consumer<Object>> loadShaderSignal =
         new SignalBiArged<>();
     
     public static void init() {
-        
-        loadShaderSignal.connect((resourceManager, resultConsumer) -> {
-            try {
-                DrawFbInAreaShader shader = new DrawFbInAreaShader(
-                    getResourceFactory(resourceManager),
-                    "portal_draw_fb_in_area",
-                    DefaultVertexFormat.POSITION_COLOR
-                );
-                resultConsumer.accept(shader);
-                drawFbInAreaShader = shader;
-            }
-            catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        });
-        
-        loadShaderSignal.connect((resourceManager, resultConsumer) -> {
-            try {
-                ShaderInstance shader = new ShaderInstance(
-                    getResourceFactory(resourceManager),
-                    "portal_area",
-                    DefaultVertexFormat.POSITION_COLOR
-                );
-                resultConsumer.accept(shader);
-                portalAreaShader = shader;
-            }
-            catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        });
-        
-        loadShaderSignal.connect((resourceManager, resultConsumer) -> {
-            try {
-                ShaderInstance shader = new ShaderInstance(
-                    getResourceFactory(resourceManager),
-                    "blit_screen_noblend",
-                    DefaultVertexFormat.POSITION_TEX_COLOR
-                );
-                resultConsumer.accept(shader);
-                blitScreenNoBlendShader = shader;
-            }
-            catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        });
+        // TODO MC 26.1: used to load custom ShaderInstances (portal_area, blit_screen_noblend,
+        // portal_draw_fb_in_area) - stubbed, see class-level TODO.
     }
     
     // vanilla hardcodes the shader namespace to be "minecraft"
     private static ResourceProvider getResourceFactory(ResourceProvider resourceManager) {
         ResourceProvider resourceFactory = new ResourceProvider() {
             @Override
-            public Optional<Resource> getResource(ResourceLocation resourceLocation) {
-                ResourceLocation corrected = McHelper.newResourceLocation(
+            public Optional<Resource> getResource(Identifier resourceLocation) {
+                Identifier corrected = McHelper.newResourceLocation(
                     "immersive_portals", resourceLocation.getPath());
                 return resourceManager.getResource(corrected);
             }
@@ -119,65 +76,13 @@ public class MyRenderHelper {
         return resourceFactory;
     }
     
-    public static class DrawFbInAreaShader extends ShaderInstance {
-        
-        public final Uniform uniformW;
-        public final Uniform uniformH;
-        
-        public DrawFbInAreaShader(
-            ResourceProvider factory, String name, VertexFormat format
-        ) throws IOException {
-            super(factory, name, format);
-            
-            uniformW = getUniform("w");
-            uniformH = getUniform("h");
-        }
-        
-        void loadWidthHeight(int w, int h) {
-            uniformW.set((float) w);
-            uniformH.set((float) h);
-        }
-    }
-    
-    public static DrawFbInAreaShader drawFbInAreaShader;
-    public static ShaderInstance portalAreaShader;
-    public static ShaderInstance blitScreenNoBlendShader;
-    
     public static void drawPortalAreaWithFramebuffer(
         Portal portal,
         RenderTarget textureProvider,
         Matrix4f modelViewMatrix,
         Matrix4f projectionMatrix
     ) {
-        
-        GlStateManager._colorMask(true, true, true, true);
-        GlStateManager._enableDepthTest();
-        GlStateManager._depthMask(true);
-        GlStateManager._viewport(0, 0, textureProvider.width, textureProvider.height);
-        
-        DrawFbInAreaShader shader = drawFbInAreaShader;
-        shader.setSampler("DiffuseSampler", textureProvider.getColorTextureId());
-        shader.loadWidthHeight(textureProvider.width, textureProvider.height);
-        
-        if (shader.MODEL_VIEW_MATRIX != null) {
-            shader.MODEL_VIEW_MATRIX.set(modelViewMatrix);
-        }
-        
-        if (shader.PROJECTION_MATRIX != null) {
-            shader.PROJECTION_MATRIX.set(projectionMatrix);
-        }
-        
-        shader.apply();
-        
-        ViewAreaRenderer.buildPortalViewAreaTrianglesBuffer(
-            Vec3.ZERO,//fog
-            portal,
-            CHelper.getCurrentCameraPos(),
-            RenderStates.getPartialTick()
-        );
-        
-        
-        shader.clear();
+        // TODO MC 26.1: see class-level TODO - stubbed no-op.
     }
     
     public static void renderScreenTriangle() {
@@ -194,78 +99,19 @@ public class MyRenderHelper {
     }
     
     public static void testOneTriangle(int r, int g, int b, int a) {
-        ShaderInstance shader = GameRenderer.getPositionColorShader();
-        Validate.notNull(shader);
-        
-        Matrix4f identityMatrix = new Matrix4f();
-        identityMatrix.identity();
-        
-        shader.MODEL_VIEW_MATRIX.set(identityMatrix);
-        shader.PROJECTION_MATRIX.set(identityMatrix);
-        
-        shader.apply();
-        
-        Tesselator tessellator = Tesselator.getInstance();
-        BufferBuilder bufferBuilder = tessellator
-            .begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
-        
-        // upper triangle
-//        bufferBuilder.addVertex(1, -1, 0).setColor(r, g, b, a)
-//            ;
-//        bufferBuilder.addVertex(1, 1, 0).setColor(r, g, b, a)
-//            ;
-//        bufferBuilder.addVertex(-1, 1, 0).setColor(r, g, b, a)
-//            ;
-        
-        // down triangle
-        bufferBuilder.addVertex(-1, 1, 0).setColor(r, g, b, a);
-        bufferBuilder.addVertex(-1, -1, 0).setColor(r, g, b, a);
-        bufferBuilder.addVertex(1, -1, 0).setColor(r, g, b, a);
-        
-        bufferBuilder.addVertex(1, 0, 0).setColor(r, g, b, a);
-        bufferBuilder.addVertex(0, 1, 0).setColor(r, g, b, a);
-        bufferBuilder.addVertex(-1, 0, 0).setColor(r, g, b, a);
-        
-        BufferUploader.draw(bufferBuilder.build());
-        
-        shader.clear();
+        // TODO MC 26.1: see class-level TODO - stubbed no-op.
     }
     
     /**
-     * {@link RenderTarget#blitToScreen(int, int)}
+     * {@link RenderTarget#blitToScreen()}
      */
     @IPVanillaCopy
     public static void renderScreenTriangle(int r, int g, int b, int a) {
-        ShaderInstance shader = GameRenderer.getPositionColorShader();
-        Validate.notNull(shader);
-        
-        Matrix4f identityMatrix = new Matrix4f();
-        identityMatrix.identity();
-        
-        shader.MODEL_VIEW_MATRIX.set(identityMatrix);
-        shader.PROJECTION_MATRIX.set(identityMatrix);
-        
-        shader.apply();
-        
-        Tesselator tessellator = RenderSystem.renderThreadTesselator();
-        BufferBuilder bufferBuilder = tessellator.
-            begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
-        
-        bufferBuilder.addVertex(1, -1, 0).setColor(r, g, b, a);
-        bufferBuilder.addVertex(1, 1, 0).setColor(r, g, b, a);
-        bufferBuilder.addVertex(-1, 1, 0).setColor(r, g, b, a);
-        
-        bufferBuilder.addVertex(-1, 1, 0).setColor(r, g, b, a);
-        bufferBuilder.addVertex(-1, -1, 0).setColor(r, g, b, a);
-        bufferBuilder.addVertex(1, -1, 0).setColor(r, g, b, a);
-        
-        BufferUploader.draw(bufferBuilder.build());
-        
-        shader.clear();
+        // TODO MC 26.1: see class-level TODO - stubbed no-op.
     }
     
     /**
-     * {@link RenderTarget#blitToScreen(int, int)}
+     * {@link RenderTarget#blitToScreen()}
      */
     public static void drawScreenFrameBuffer(
         RenderTarget textureProvider,
@@ -275,8 +121,8 @@ public class MyRenderHelper {
         int x = 0;
         int y = 0;
         
-        int viewportWidth = textureProvider.viewWidth;
-        int viewportHeight = textureProvider.viewHeight;
+        int viewportWidth = textureProvider.width;
+        int viewportHeight = textureProvider.height;
         
         drawFramebufferWithCoordinatesAndDimensions(
             textureProvider, doUseAlphaBlend, doEnableModifyAlpha,
@@ -325,69 +171,14 @@ public class MyRenderHelper {
     }
     
     /**
-     * {@link RenderTarget#blitToScreen(int, int)}
+     * {@link RenderTarget#blitToScreen()}
      */
     @IPVanillaCopy
     public static void drawFramebufferWithCoordinatesAndDimensions(
         RenderTarget textureProvider, boolean doUseAlphaBlend, boolean doEnableModifyAlpha,
         int x, int y, int viewportWidth, int viewportHeight
     ) {
-        CHelper.checkGlError();
-
-        RenderSystem.disableDepthTest();
-        RenderSystem.depthMask(false);
-        RenderSystem.viewport(x, textureProvider.viewHeight - viewportHeight - y, viewportWidth, viewportHeight);
-        
-        if (doUseAlphaBlend) {
-            RenderSystem.enableBlend();
-            
-            // this is used for rendering a FB onto screen when the FB contains translucent things
-            // the FB should initialize with zero color and zero alpha
-            // MC's default blend func is: color = srcColor * srcAlpha + dstColor * (1-srcAlpha)
-            // then the FB's rendered content would be fbColor = contentColor * contentAlpha
-            // we want the roughtly same effect of rendering the translucent thing directly onto current FB, so we want:
-            // color = contentColor * contentAlpha + dstColor * (1-contentAlpha)
-            // color = fbColor * 1 + dstColor * (1-contentAlpha)
-            RenderSystem.blendFuncSeparate(
-                GlStateManager.SourceFactor.ONE,
-                GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA,
-                GlStateManager.SourceFactor.ZERO,
-                GlStateManager.DestFactor.ONE
-            );
-        }
-        else {
-            RenderSystem.disableBlend();
-        }
-        
-        if (doEnableModifyAlpha) {
-            RenderSystem.colorMask(true, true, true, true);
-        }
-        else {
-            RenderSystem.colorMask(true, true, true, false);
-        }
-        
-        ShaderInstance shader = doUseAlphaBlend ?
-            client.gameRenderer.blitShader : blitScreenNoBlendShader;
-        
-        Validate.notNull(shader, "shader is null");
-        
-        shader.setSampler("DiffuseSampler", textureProvider.getColorTextureId());
-        shader.apply();
-        BufferBuilder bufferBuilder = RenderSystem.renderThreadTesselator().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.BLIT_SCREEN);
-        bufferBuilder.addVertex(0.0f, 0.0f, 0.0f);
-        bufferBuilder.addVertex(1.0f, 0.0f, 0.0f);
-        bufferBuilder.addVertex(1.0f, 1.0f, 0.0f);
-        bufferBuilder.addVertex(0.0f, 1.0f, 0.0f);
-        BufferUploader.draw(bufferBuilder.buildOrThrow());
-        shader.clear();
-
-        RenderSystem.depthMask(true);
-        RenderSystem.colorMask(true, true, true, true);
-        
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        
-        CHelper.checkGlError();
+        // TODO MC 26.1: see class-level TODO - stubbed no-op (used ShaderInstance-based blit).
     }
     
     // it will remove the light sections that are marked to be removed
@@ -432,11 +223,10 @@ public class MyRenderHelper {
     }
     
     public static void clearAlphaTo1(RenderTarget mcFrameBuffer) {
-        mcFrameBuffer.bindWrite(true);
-        RenderSystem.colorMask(false, false, false, true);
-        RenderSystem.clearColor(0, 0, 0, 1.0f);
-        RenderSystem.clear(GL_COLOR_BUFFER_BIT, true);
-        RenderSystem.colorMask(true, true, true, true);
+        // TODO MC 26.1: RenderTarget.bindWrite/RenderSystem.clear(int,boolean) removed;
+        // clearing now goes through RenderSystem.getDevice().createCommandEncoder()
+        // .clearColorAndDepthTextures(...) operating on GpuTexture objects directly.
+        // Stubbed no-op pending the broader RendererUsingFrameBuffer redesign.
     }
     
     public static void restoreViewPort() {

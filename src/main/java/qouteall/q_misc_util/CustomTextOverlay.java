@@ -1,12 +1,16 @@
 package qouteall.q_misc_util;
 
+import net.minecraft.util.profiling.Profiler;
+
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.ActiveTextCollector;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.Gui;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.TextAlignment;
 import net.minecraft.client.gui.components.MultiLineLabel;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -60,10 +64,10 @@ public class CustomTextOverlay {
     }
     
     /**
-     * {@link Gui#render(GuiGraphics, float)}
+     * {@link Gui#extractRenderState(GuiGraphicsExtractor, DeltaTracker)}
      * {@link net.minecraft.client.gui.screens.AlertScreen}
      */
-    public static void render(GuiGraphics guiGraphics, DeltaTracker deltaTracker) {
+    public static void render(GuiGraphicsExtractor guiGraphics, DeltaTracker deltaTracker) {
         long currTime = System.nanoTime();
         
         boolean removes = ENTRIES.entrySet().removeIf(e -> e.getValue().clearingTime < currTime);
@@ -100,34 +104,37 @@ public class CustomTextOverlay {
         
         Minecraft minecraft = Minecraft.getInstance();
         
-        guiGraphics.pose().pushPose();
+        guiGraphics.pose().pushMatrix();
         
         int guiScaledWidth = minecraft.getWindow().getGuiScaledWidth();
         int guiScaledHeight = minecraft.getWindow().getGuiScaledHeight();
         
         Font font = minecraft.gui.getFont();
         
-        minecraft.getProfiler().push("imm_ptl_custom_overlay");
+        ActiveTextCollector textRenderer = guiGraphics.textRenderer();
+        
+        Profiler.get().push("imm_ptl_custom_overlay");
         if (renderAtBottomCenter) {
-            // Note: the parchment names are incorrect
-            multiLineLabelCache.renderCentered(
-                guiGraphics,
+            multiLineLabelCache.visitLines(
+                TextAlignment.CENTER,
                 guiScaledWidth / 2, // x
-                (int) (guiScaledHeight * 0.75) // y
+                (int) (guiScaledHeight * 0.75), // y
+                9, // line height
+                textRenderer
             );
         }
         else {
-            multiLineLabelCache.renderLeftAligned(
-                guiGraphics,
+            multiLineLabelCache.visitLines(
+                TextAlignment.LEFT,
                 10, // x
                 10, // y
                 9, // line height
-                0xffffffff // color
+                textRenderer
             );
         }
         
-        guiGraphics.pose().popPose();
+        guiGraphics.pose().popMatrix();
         
-        minecraft.getProfiler().pop();
+        Profiler.get().pop();
     }
 }

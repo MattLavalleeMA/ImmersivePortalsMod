@@ -1,14 +1,8 @@
 package qouteall.imm_ptl.core.render;
 
-import com.mojang.blaze3d.platform.GlStateManager;
+import com.mojang.blaze3d.opengl.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.BufferBuilder;
-import com.mojang.blaze3d.vertex.BufferUploader;
-import com.mojang.blaze3d.vertex.DefaultVertexFormat;
-import com.mojang.blaze3d.vertex.Tesselator;
-import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import qouteall.imm_ptl.core.CHelper;
@@ -18,8 +12,14 @@ import qouteall.imm_ptl.core.render.context_management.PortalRendering;
 import qouteall.imm_ptl.core.render.context_management.RenderStates;
 import qouteall.q_misc_util.my_util.TriangleConsumer;
 
-import java.util.Objects;
-
+// TODO MC 26.1: renderPortalArea/buildPortalViewAreaTrianglesBuffer used to draw the
+// portal's view-area geometry (as colored triangles via a custom ShaderInstance) into
+// the stencil buffer to mask which screen pixels show the portal's other side.
+// ShaderInstance/Tesselator-based BufferUploader.draw no longer exist - the new pipeline
+// has no dynamic stencil test state at all (DepthStencilState is baked into a
+// RenderPipeline at build time), so this needs a new algorithm (custom RenderPipeline +
+// GpuBuffer + RenderPass, see Distant Horizons' "Blaze" wrapper package for reference),
+// not just an API port. Stubbed as no-op pending dedicated in-game-tested follow-up.
 public class ViewAreaRenderer {
     
     public static void renderPortalArea(
@@ -28,120 +28,14 @@ public class ViewAreaRenderer {
         boolean doFaceCulling, boolean doModifyColor,
         boolean doModifyDepth, boolean doClip
     ) {
-        
-        if (doFaceCulling) {
-            GlStateManager._enableCull();
-        }
-        else {
-            GlStateManager._disableCull();
-        }
-        
-        if (portal.isFuseView() && IPGlobal.maxPortalLayer != 0) {
-            GlStateManager._colorMask(false, false, false, false);
-        }
-        else {
-            if (!doModifyColor) {
-                GlStateManager._colorMask(false, false, false, false);
-            }
-            else {
-                GlStateManager._colorMask(true, true, true, true);
-            }
-        }
-        
-        if (doModifyDepth) {
-            if (portal.isFuseView()) {
-                GlStateManager._depthMask(false);
-            }
-            else {
-                GlStateManager._depthMask(true);
-            }
-        }
-        else {
-            GlStateManager._depthMask(false);
-        }
-        
-        boolean shouldReverseCull = PortalRendering.isRenderingOddNumberOfMirrors();
-        if (shouldReverseCull) {
-            MyRenderHelper.applyMirrorFaceCulling();
-        }
-        
-        if (doClip) {
-            if (PortalRendering.isRendering()) {
-                FrontClipping.setupInnerClipping(
-                    PortalRendering.getActiveClippingPlane(),
-                    modelViewMatrix, 0  // don't do adjustment
-                );
-            }
-        }
-        else {
-            FrontClipping.disableClipping();
-        }
-        
-        GlStateManager._enableDepthTest();
-        
-        CHelper.enableDepthClamp();
-        
-        ShaderInstance shader = MyRenderHelper.portalAreaShader;
-        RenderSystem.setShader(() -> shader);
-        
-        shader.MODEL_VIEW_MATRIX.set(modelViewMatrix);
-        shader.PROJECTION_MATRIX.set(projectionMatrix);
-        
-        FrontClipping.updateClippingEquationUniformForCurrentShader(false);
-        
-        shader.apply();
-        
-        ViewAreaRenderer.buildPortalViewAreaTrianglesBuffer(
-            fogColor,
-            portal,
-            CHelper.getCurrentCameraPos(),
-            RenderStates.getPartialTick()
-        );
-        
-        shader.clear();
-        
-        GlStateManager._enableCull();
-        CHelper.disableDepthClamp();
-        
-        GlStateManager._colorMask(true, true, true, true);
-        GlStateManager._depthMask(true);
-        
-        if (shouldReverseCull) {
-            MyRenderHelper.recoverFaceCulling();
-        }
-        
-        if (PortalRendering.isRendering()) {
-            FrontClipping.disableClipping();
-        }
-        
-        CHelper.checkGlError();
+        // no-op: see class-level TODO
     }
     
     public static void buildPortalViewAreaTrianglesBuffer(
         Vec3 fogColor, Portal portal,
         Vec3 cameraPos, float partialTick
     ) {
-        Tesselator tessellator = RenderSystem.renderThreadTesselator();
-        BufferBuilder bufferBuilder = tessellator
-            .begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
-        
-        Vec3 originRelativeToCamera = portal.getOriginPos().subtract(cameraPos);
-        
-        TriangleConsumer vertexOutput = (p0x, p0y, p0z, p1x, p1y, p1z, p2x, p2y, p2z) -> {
-            bufferBuilder
-                .addVertex((float) p0x, (float) p0y, (float) p0z)
-                .setColor((float) fogColor.x, (float) fogColor.y, (float) fogColor.z, 1.0f);
-            bufferBuilder
-                .addVertex((float) p1x, (float) p1y, (float) p1z)
-                .setColor((float) fogColor.x, (float) fogColor.y, (float) fogColor.z, 1.0f);
-            bufferBuilder
-                .addVertex((float) p2x, (float) p2y, (float) p2z)
-                .setColor((float) fogColor.x, (float) fogColor.y, (float) fogColor.z, 1.0f);
-        };
-        
-        portal.renderViewAreaMesh(originRelativeToCamera, vertexOutput);
-        
-        BufferUploader.draw(Objects.requireNonNull(bufferBuilder.build()));
+        // no-op: see class-level TODO
     }
     
     public static void outputTriangle(

@@ -5,7 +5,7 @@ import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import net.minecraft.Util;
+import net.minecraft.util.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderGetter;
@@ -84,7 +84,7 @@ public class ErrorTerrainGenerator extends DelegatedChunkGenerator {
                 new CacheLoader<ChunkPos, RegionErrorTerrainGenerator>() {
                     public RegionErrorTerrainGenerator load(ChunkPos key) {
                         return new RegionErrorTerrainGenerator(
-                            key.x, key.z,
+                            key.x(), key.z(),
                             System.nanoTime()
                             // use the system time as seed
                             // there is no need to keep the error terrain generation consistent
@@ -127,8 +127,8 @@ public class ErrorTerrainGenerator extends DelegatedChunkGenerator {
         Heightmap surfaceHeightMap = protoChunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
         BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos();
         
-        int regionX = Math.floorDiv(pos.x, regionChunkNum);
-        int regionZ = Math.floorDiv(pos.z, regionChunkNum);
+        int regionX = Math.floorDiv(pos.x(), regionChunkNum);
+        int regionZ = Math.floorDiv(pos.z(), regionChunkNum);
         RegionErrorTerrainGenerator generator = Helper.noError(() ->
             cache.get(new ChunkPos(regionX, regionZ))
         );
@@ -139,9 +139,9 @@ public class ErrorTerrainGenerator extends DelegatedChunkGenerator {
             for (int localX = 0; localX < 16; localX++) {
                 for (int localZ = 0; localZ < 16; localZ++) {
                     for (int localY = 0; localY < 16; localY++) {
-                        int worldX = pos.x * 16 + localX;
+                        int worldX = pos.x() * 16 + localX;
                         int worldY = sectionY * 16 + localY;
-                        int worldZ = pos.z * 16 + localZ;
+                        int worldZ = pos.z() * 16 + localZ;
                         
                         BlockState currBlockState = generator.getBlockComposition(
                             worldX, worldY, worldZ

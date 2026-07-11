@@ -1,15 +1,19 @@
 package qouteall.imm_ptl.core.mixin.client.render;
 
+import net.minecraft.util.profiling.Profiler;
+
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.sugar.Local;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Camera;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.LevelRenderer;
-import net.minecraft.client.renderer.LightTexture;
+import net.minecraft.client.renderer.Lightmap;
 import org.joml.Matrix4f;
+import org.joml.Matrix4fc;
 import org.joml.Quaternionfc;
 import org.slf4j.Logger;
 import org.spongepowered.asm.mixin.Final;
@@ -19,6 +23,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import qouteall.imm_ptl.core.ClientWorldLoader;
@@ -43,7 +48,7 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     @Shadow
     @Final
     @Mutable
-    private LightTexture lightTexture;
+    private Lightmap lightmap;
     
     @Shadow
     private boolean renderHand;
@@ -71,16 +76,16 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     private void onFarBeforeRendering(
         DeltaTracker deltaTracker, boolean renderWorldIn, CallbackInfo ci
     ) {
-        minecraft.getProfiler().push("ip_pre_total_render");
+        Profiler.get().push("ip_pre_total_render");
         IPGlobal.PRE_TOTAL_RENDER_TASK_LIST.processTasks();
-        minecraft.getProfiler().pop();
+        Profiler.get().pop();
         if (minecraft.level == null) {
             return;
         }
         if (!renderWorldIn) { // when respawning, it will runTick and execute rendering
             return;
         }
-        minecraft.getProfiler().push("ip_pre_render");
+        Profiler.get().push("ip_pre_render");
         // Note do not use delta tick. use partial tick.
         float partialTick = deltaTracker.getGameTimeDeltaPartialTick(true);
         RenderStates.updatePreRenderInfo(partialTick);
@@ -93,7 +98,7 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
         if (IPCGlobal.earlyRemoteUpload) {
             MyRenderHelper.earlyRemoteUpload();
         }
-        minecraft.getProfiler().pop();
+        Profiler.get().pop();
         
         RenderStates.frameIndex++;
     }
@@ -133,9 +138,9 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
         GuiPortalRendering._onGameRenderEnd();
         
         if (IPCGlobal.lateClientLightUpdate) {
-            minecraft.getProfiler().push("ip_late_update_light");
+            Profiler.get().push("ip_late_update_light");
             MyRenderHelper.lateUpdateLight();
-            minecraft.getProfiler().pop();
+            Profiler.get().pop();
         }
     }
     
@@ -164,21 +169,28 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
         IPCGlobal.renderer.onHandRenderingEnded();
     }
     
-    @WrapOperation(
+    // TODO MC 26.1: the old WrapOperation targeted
+    // LevelRenderer.renderLevel(DeltaTracker,boolean,Camera,GameRenderer,LightTexture,
+    // Matrix4f,Matrix4f), which was completely restructured (now
+    // LevelRenderer.renderLevel(GraphicsResourceAllocator,DeltaTracker,boolean,
+    // CameraRenderState,Matrix4fc,GpuBufferSlice,Vector4f,boolean,ChunkSectionsToRender),
+    // and most of the actual translucent/entity rendering now happens inside a
+    // FrameGraphBuilder pass lambda built by LevelRenderer.addMainPass, not sequentially
+    // in renderLevel's own body - the old "before hand rendering" anchor point doesn't
+    // exist in the same form anymore. Using the renderItemInHand(...) call within
+    // GameRenderer.renderLevel (which still runs right after LevelRenderer.renderLevel
+    // returns) as the new anchor instead.
+    @Inject(
         method = "renderLevel",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/client/renderer/LevelRenderer;renderLevel(Lnet/minecraft/client/DeltaTracker;ZLnet/minecraft/client/Camera;Lnet/minecraft/client/renderer/GameRenderer;Lnet/minecraft/client/renderer/LightTexture;Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;)V"
+            target = "Lnet/minecraft/client/renderer/GameRenderer;renderItemInHand(Lnet/minecraft/client/renderer/state/level/CameraRenderState;FLorg/joml/Matrix4fc;)V"
         )
     )
-    private void wrapRenderLevel(
-        LevelRenderer instance, DeltaTracker deltaTracker, boolean bl, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f modelView, Matrix4f projection, Operation<Void> original
+    private void ip_onBeforeHandRendering(
+        DeltaTracker deltaTracker, CallbackInfo ci, @Local(ordinal = 0) Matrix4fc modelViewMatrix
     ) {
-        original.call(
-            instance, deltaTracker, bl, camera, gameRenderer, lightTexture, modelView, projection
-        );
-        
-        IPCGlobal.renderer.onBeforeHandRendering(modelView);
+        IPCGlobal.renderer.onBeforeHandRendering(new Matrix4f(modelViewMatrix));
     }
     
     //resize all world renderers when resizing window
@@ -272,31 +284,20 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     
     // make sure that the portal rendering basic projection matrix is right
     // the basic projection matrix does not contain view bobbing
-    @Redirect(
-        method = "renderLevel",
-        at = @At(
-            value = "INVOKE",
-            target = "Lnet/minecraft/client/renderer/GameRenderer;getProjectionMatrix(D)Lorg/joml/Matrix4f;",
-            ordinal = 0
-        )
-    )
-    private Matrix4f redirectGetBasicProjectionMatrix(GameRenderer instance, double fov) {
-        if (PortalRendering.isRendering()) {
-            if (RenderStates.basicProjectionMatrix != null) {
-                // replace the basic projection matrix
-                // copy to avoid unwanted modification
-                return new Matrix4f(RenderStates.basicProjectionMatrix);
-            }
-            else {
-                LOGGER.error("[iPortal] Projection matrix state abnormal");
-            }
-        }
-        
-        Matrix4f result = instance.getProjectionMatrix(fov);
-        // copy to avoid unwanted modification
-        RenderStates.basicProjectionMatrix = new Matrix4f(result);
-        
-        return result;
+    // TODO MC 26.1: the old redirect targeted GameRenderer.getProjectionMatrix(double),
+    // which no longer exists (projection matrix is now computed via
+    // Camera.extractRenderState into CameraRenderState.projectionMatrix during the new
+    // separate "extract" phase, before this render() call happens at all). Capturing the
+    // pre-view-bobbing matrix here (right when the local var is first assigned, before
+    // .mul(bobStack...)/.rotate(...) mutate it in place) is a reasonable equivalent, but
+    // the old ability to OVERRIDE it with a previously-captured value while
+    // PortalRendering.isRendering() (to keep nested portal-content renders consistent
+    // with the outer render's bobbing) is not reproduced here and may need revisiting
+    // with in-game testing.
+    @ModifyVariable(method = "renderLevel", at = @At("STORE"), ordinal = 0)
+    private Matrix4f ip_captureBasicProjectionMatrix(Matrix4f projectionMatrix) {
+        RenderStates.basicProjectionMatrix = new Matrix4f(projectionMatrix);
+        return projectionMatrix;
     }
     
     @WrapOperation(
@@ -315,8 +316,13 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     }
     
     @Override
-    public void ip_setLightmapTextureManager(LightTexture manager) {
-        lightTexture = manager;
+    public void ip_setLightmapTextureManager(Lightmap manager) {
+        lightmap = manager;
+    }
+    
+    @Override
+    public Lightmap ip_getLightmap() {
+        return lightmap;
     }
     
     @Override

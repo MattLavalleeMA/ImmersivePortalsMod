@@ -3,7 +3,7 @@ package qouteall.imm_ptl.core.mixin.client.render;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.LevelRenderer;
-import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.ViewArea;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
 import net.minecraft.world.phys.Vec3;
@@ -69,19 +69,9 @@ public class MixinLevelRenderer_Optional {
         chunkBuilder.setCamera(cameraPosition);
     }
     
-    @Inject(
-        method = "renderSectionLayer",
-        at = @At(
-            value = "INVOKE",
-            target = "Lnet/minecraft/client/renderer/ShaderInstance;apply()V"
-        ),
-        require = 0
-    )
-    private void onGetShaderInRenderingLayer(
-        RenderType renderType, double x, double y, double z, Matrix4f projectionMatrix, Matrix4f frustrumMatrix, CallbackInfo ci
-    ) {
-        FrontClipping.updateClippingEquationUniformForCurrentShader(false);
-    }
+    // TODO MC 26.1: old anchor ShaderInstance.apply() no longer exists (ShaderInstance
+    // itself was removed) - the clip-plane-uniform mechanism this drove is stubbed
+    // (see FrontClipping's class-level TODO), so this hook is no longer needed.
     
     // correct the position of updating ViewArea
     @Redirect(

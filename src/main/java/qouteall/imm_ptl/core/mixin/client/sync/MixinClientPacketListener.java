@@ -107,16 +107,18 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         assert player != null;
         Level playerWorld = player.level();
         
+        Vec3 packetPos = packet.change().position();
+        
         if (packetDim != playerWorld.dimension()) {
             LOGGER.info(
                 "[ImmPtl] Client accepted position packet in another dimension. Packet: {} {} {} {}. Player: {} {} {} {}",
-                packetDim.location(), packet.getX(), packet.getY(), packet.getZ(),
-                playerWorld.dimension().location(), player.getX(), player.getY(), player.getZ()
+                packetDim.identifier(), packetPos.x, packetPos.y, packetPos.z,
+                playerWorld.dimension().identifier(), player.getX(), player.getY(), player.getZ()
             );
             
             ClientTeleportationManager.forceTeleportPlayer(
                 packetDim,
-                new Vec3(packet.getX(), packet.getY(), packet.getZ())
+                packetPos
             );
 
 //            ClientTeleportationManager.disableTeleportFor(2);
@@ -124,7 +126,7 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         
         LOGGER.info(
             "[ImmPtl] Client accepted position packet {} {} {} {}",
-            packetDim.location(), packet.getX(), packet.getY(), packet.getZ()
+            packetDim.identifier(), packetPos.x, packetPos.y, packetPos.z
         );
     }
     
@@ -278,7 +280,7 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         ClientboundLevelChunkWithLightPacket packet, CallbackInfo ci
     ) {
         if (IPGlobal.chunkPacketDebug) {
-            LOGGER.info("Chunk Load Packet {} {} {}", level.dimension().location(), packet.getX(), packet.getZ());
+            LOGGER.info("Chunk Load Packet {} {} {}", level.dimension().identifier(), packet.getX(), packet.getZ());
         }
     }
     
@@ -297,7 +299,7 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         if (IPGlobal.chunkPacketDebug) {
             LOGGER.info(
                 "Chunk Unload Packet {} {} {}",
-                level.dimension().location(), packet.pos().x, packet.pos().z
+                level.dimension().identifier(), packet.pos().x(), packet.pos().z()
             );
         }
     }

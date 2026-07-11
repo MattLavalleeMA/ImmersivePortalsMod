@@ -272,7 +272,7 @@ public abstract class MixinEntity implements IEEntity, ImmPtlEntityExtension {
             ip_portalCollisionHandler.update(this_);
         }
         
-        if (level.isClientSide) {
+        if (level.isClientSide()) {
             IPMcHelper.onClientEntityTick(this_);
         }
     }
@@ -330,10 +330,10 @@ public abstract class MixinEntity implements IEEntity, ImmPtlEntityExtension {
             ) {
                 this.blockPosition = new BlockPos(bx, by, bz);
                 this.inBlockState = null;
-                if (SectionPos.blockToSectionCoord(bx) != this.chunkPosition.x
-                    || SectionPos.blockToSectionCoord(bz) != this.chunkPosition.z
+                if (SectionPos.blockToSectionCoord(bx) != this.chunkPosition.x()
+                    || SectionPos.blockToSectionCoord(bz) != this.chunkPosition.z()
                 ) {
-                    this.chunkPosition = new ChunkPos(this.blockPosition);
+                    this.chunkPosition = ChunkPos.containing(this.blockPosition);
                 }
             }
         }

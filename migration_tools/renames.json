@@ -1,0 +1,38 @@
+{
+  "_comment": "Old FQN -> New FQN. Leave value as \"TODO\" until confirmed via find_candidates.py; bulk_rename.py skips TODO/empty entries. Use \"NOT_A_RENAME - ...\" for symbols that needed a real API-shape fix applied directly to specific files (also skipped by bulk_rename.py, kept here as a record). Special cases that aren't simple renames (e.g. TicketType/Ticket losing their type parameter, OcclusionCuller.Visitor) need manual source edits instead of this mapping.",
+
+  "net.minecraft.resources.ResourceLocation": "net.minecraft.resources.Identifier",
+  "net.minecraft.Util": "net.minecraft.util.Util",
+  "net.minecraft.world.level.GameRules": "net.minecraft.world.level.gamerules.GameRules",
+  "net.minecraft.world.entity.vehicle.AbstractMinecart": "net.minecraft.world.entity.vehicle.minecart.AbstractMinecart",
+  "net.minecraft.client.gui.GuiGraphics": "NOT_A_RENAME - see ExampleGuiPortalRendering.java: render(GuiGraphics,...) -> extractRenderState(GuiGraphicsExtractor,...), fixed directly",
+
+  "net.minecraft.world.entity.projectile.AbstractArrow": "net.minecraft.world.entity.projectile.arrow.AbstractArrow",
+  "net.minecraft.world.entity.projectile.Arrow": "net.minecraft.world.entity.projectile.arrow.Arrow",
+  "net.minecraft.world.entity.projectile.ThrownEnderpearl": "net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl",
+  "net.minecraft.world.level.dimension.end.EndDragonFight": "net.minecraft.world.level.dimension.end.EnderDragonFight",
+  "net.minecraft.world.level.portal.DimensionTransition": "net.minecraft.world.level.portal.TeleportTransition",
+  "net.minecraft.world.entity.RelativeMovement": "net.minecraft.world.entity.Relative",
+  "net.minecraft.client.gui.screens.ReceivingLevelScreen": "net.minecraft.client.gui.screens.GenericWaitingScreen",
+
+  "_confirmed_via_javap": "DimensionDataStorage -> SavedDataStorage confirmed: same computeIfAbsent(SavedDataType)/get/set shape, and TicketStorage (a SavedData) is retrieved this way.",
+  "net.minecraft.world.level.storage.DimensionDataStorage": "net.minecraft.world.level.storage.SavedDataStorage",
+
+  "net.minecraft.server.level.ChunkTaskPriorityQueueSorter": "TODO",
+  "net.minecraft.util.thread.ProcessorMailbox": "TODO",
+
+  "net.fabricmc.fabric.api.client.command.v2.ClientCommandManager": "net.fabricmc.fabric.api.client.command.v2.ClientCommands",
+  "net.fabricmc.fabric.api.object.builder.v1.block.FabricBlockSettings": "NOT_A_RENAME - see PortalPlaceholderBlock.java: FabricBlockSettings.create() -> BlockBehaviour.Properties.of(), fixed directly",
+
+  "com.mojang.blaze3d.platform.GlStateManager": "TODO",
+  "com.mojang.blaze3d.platform.GlUtil": "TODO",
+  "com.mojang.blaze3d.platform.GlDebug": "TODO",
+  "com.mojang.blaze3d.vertex.VertexBuffer": "TODO",
+  "net.minecraft.client.renderer.LightTexture": "TODO",
+  "net.minecraft.client.renderer.RenderType": "net.minecraft.client.renderer.rendertype.RenderType",
+  "net.minecraft.client.renderer.ShaderInstance": "TODO",
+  "com.mojang.blaze3d.shaders.Program": "TODO",
+  "com.mojang.blaze3d.shaders.Uniform": "TODO",
+  "net.minecraft.client.GraphicsStatus": "TODO",
+  "net.minecraft.client.renderer.FogRenderer": "net.minecraft.client.renderer.fog.FogRenderer"
+}

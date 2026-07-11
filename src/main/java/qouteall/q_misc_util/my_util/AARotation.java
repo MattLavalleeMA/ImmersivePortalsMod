@@ -64,9 +64,9 @@ public enum AARotation {
         this.transformedX = transformedX;
         this.transformedY = dirCrossProduct(transformedZ, transformedX);
         matrix = new IntMatrix3(
-            this.transformedX.getNormal(),
-            this.transformedY.getNormal(),
-            this.transformedZ.getNormal()
+            this.transformedX.getUnitVec3i(),
+            this.transformedY.getUnitVec3i(),
+            this.transformedZ.getUnitVec3i()
         );
         quaternion = matrix.toQuaternion();
     }
@@ -76,21 +76,23 @@ public enum AARotation {
     }
     
     public Direction transformDirection(Direction direction) {
-        BlockPos transformedVec = transform(direction.getNormal());
-        return Direction.fromDelta(
+        BlockPos transformedVec = transform(direction.getUnitVec3i());
+        return Direction.getNearest(
             transformedVec.getX(),
             transformedVec.getY(),
-            transformedVec.getZ()
+            transformedVec.getZ(),
+            Direction.UP
         );
     }
     
     @NotNull
     public static Direction dirCrossProduct(Direction a, Direction b) {
         Validate.isTrue(a.getAxis() != b.getAxis());
-        Direction result = Direction.fromDelta(
+        Direction result = Direction.getNearest(
             a.getStepY() * b.getStepZ() - a.getStepZ() * b.getStepY(),
             a.getStepZ() * b.getStepX() - a.getStepX() * b.getStepZ(),
-            a.getStepX() * b.getStepY() - a.getStepY() * b.getStepX()
+            a.getStepX() * b.getStepY() - a.getStepY() * b.getStepX(),
+            Direction.UP
         );
         Validate.notNull(result);
         return result;

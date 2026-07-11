@@ -1,9 +1,11 @@
 package qouteall.imm_ptl.core.render.context_management;
 
+import net.minecraft.util.profiling.Profiler;
+
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.renderer.FogRenderer;
+import net.minecraft.client.renderer.fog.FogRenderer;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
@@ -67,7 +69,7 @@ public class FogRendererContext {
     ) {
         Minecraft client = Minecraft.getInstance();
         
-        client.getProfiler().push("get_fog_color");
+        Profiler.get().push("get_fog_color");
         
         ClientLevel oldWorld = client.level;
         
@@ -85,7 +87,7 @@ public class FogRendererContext {
         
         Camera newCamera = new Camera();
         ((IECamera) newCamera).portal_setPos(pos);
-        ((IECamera) newCamera).portal_setFocusedEntity(client.cameraEntity);
+        ((IECamera) newCamera).portal_setFocusedEntity(client.getCameraEntity());
         
         try {
             FogRenderer.setupColor(
@@ -104,7 +106,7 @@ public class FogRendererContext {
             swappingManager.popSwapping();
             client.level = oldWorld;
             
-            client.getProfiler().pop();
+            Profiler.get().pop();
         }
     }
     

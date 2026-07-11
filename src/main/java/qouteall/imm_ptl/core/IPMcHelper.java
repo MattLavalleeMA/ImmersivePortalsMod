@@ -1,6 +1,6 @@
 package qouteall.imm_ptl.core;
 
-import com.mojang.blaze3d.platform.GlUtil;
+import com.mojang.blaze3d.systems.RenderSystem;
 import io.netty.buffer.Unpooled;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -177,7 +177,7 @@ public class IPMcHelper {
      * @return Whatever {@code func} returned.
      */
     public static <T> T withSwitchedContext(Level world, Supplier<T> func) {
-        if (world.isClientSide) {
+        if (world.isClientSide()) {
             return ClientWorldLoader.withSwitchedWorld((ClientLevel) world, func);
         }
         else {
@@ -205,7 +205,7 @@ public class IPMcHelper {
             return new Tuple<>(
                 BlockHitResult.miss(
                     end,
-                    Direction.getNearest(diff.x, diff.y, diff.z),
+                    Direction.getApproximateNearest(diff),
                     BlockPos.containing(end)
                 ),
                 portals
@@ -289,8 +289,7 @@ public class IPMcHelper {
         String command
     ) {
         return component.withStyle(
-            style -> style.withClickEvent(new ClickEvent(
-                ClickEvent.Action.RUN_COMMAND,
+            style -> style.withClickEvent(new ClickEvent.RunCommand(
                 command
             )).withUnderlined(true)
         );
@@ -312,7 +311,7 @@ public class IPMcHelper {
     
     @Environment(EnvType.CLIENT)
     public static boolean isNvidiaVideocard() {
-        return GlUtil.getVendor().toLowerCase().contains("nvidia");
+        return RenderSystem.getDevice().getVendor().toLowerCase().contains("nvidia");
     }
     
     public static FriendlyByteBuf bytesToBuf(byte[] packetBytes) {

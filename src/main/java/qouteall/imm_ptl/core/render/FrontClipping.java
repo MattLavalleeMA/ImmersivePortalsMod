@@ -1,10 +1,7 @@
 package qouteall.imm_ptl.core.render;
 
-import com.mojang.blaze3d.shaders.Uniform;
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
@@ -13,7 +10,6 @@ import org.lwjgl.opengl.GL11;
 import qouteall.imm_ptl.core.CHelper;
 import qouteall.imm_ptl.core.IPCGlobal;
 import qouteall.imm_ptl.core.IPGlobal;
-import qouteall.imm_ptl.core.ducks.IEShader;
 import qouteall.imm_ptl.core.portal.Portal;
 import qouteall.imm_ptl.core.render.context_management.PortalRendering;
 import qouteall.q_misc_util.my_util.Plane;
@@ -149,7 +145,7 @@ public class FrontClipping {
         
         Vec3 planeNormal = outerClipping.normal();
         
-        Vec3 cameraPos = client.gameRenderer.getMainCamera().getPosition();
+        Vec3 cameraPos = client.gameRenderer.getMainCamera().position();
         
         Vec3 portalPos = outerClipping.pos()
             .subtract(cameraPos);
@@ -171,49 +167,31 @@ public class FrontClipping {
         return activeClipPlaneAfterModelView;
     }
     
+    // TODO MC 26.1: the old mechanism injected a custom "iportal_ClippingEquation"
+    // uniform into every vanilla ShaderInstance's GLSL source and set its value here
+    // per-frame whenever RenderSystem.setShader() was called. ShaderInstance/Program/
+    // Shader/Uniform (and RenderSystem.setShader()/getShader()) no longer exist - shaders
+    // are now compiled centrally by ShaderManager into RenderPipeline objects and bound
+    // per-RenderPass with setUniform(name, GpuBuffer), with no "currently active shader"
+    // global hook point. Re-implementing this needs a new injection point (e.g. mixing
+    // into RenderSystem.bindDefaultUniforms(RenderPass) or RenderPass.setPipeline) plus a
+    // GpuBuffer-backed uniform declared via GLSL source injection - needs dedicated,
+    // in-game-tested follow-up. Stubbed as no-op for now; the GL_CLIP_PLANE0 based path
+    // above is unaffected by this but note GL_CLIP_PLANE0 is legacy compatibility-profile
+    // OpenGL and may already be a no-op on the core profile context Minecraft uses.
     public static void updateClippingEquationUniformForCurrentShader(
         boolean isRenderingEntities
     ) {
         if (!IPGlobal.enableClippingMechanism) {
             return;
         }
-        
-        ShaderInstance shader = RenderSystem.getShader();
-        
-        if (shader == null) {
-            return;
-        }
-        
-        Uniform clippingEquationUniform = ((IEShader) shader).ip_getClippingEquationUniform();
-        if (clippingEquationUniform != null) {
-            if (isClippingEnabled) {
-                double[] equation = activeClipPlaneEquationBeforeModelView;
-//                double[] equation = isRenderingEntities ? activeClipPlaneAfterModelView : activeClipPlaneEquationBeforeModelView;
-                clippingEquationUniform.set(
-                    (float) equation[0], (float) equation[1],
-                    (float) equation[2], (float) equation[3]
-                );
-            }
-            else {
-                clippingEquationUniform.set(0f, 0f, 0f, 1f);
-            }
-        }
+        // no-op: see TODO above
     }
     
     public static void unsetClippingUniform() {
         if (!IPGlobal.enableClippingMechanism) {
             return;
         }
-        
-        ShaderInstance shader = RenderSystem.getShader();
-        
-        if (shader == null) {
-            return;
-        }
-        
-        Uniform clippingEquationUniform = ((IEShader) shader).ip_getClippingEquationUniform();
-        if (clippingEquationUniform != null) {
-            clippingEquationUniform.set(0f, 0f, 0f, 1f);
-        }
+        // no-op: see TODO above
     }
 }

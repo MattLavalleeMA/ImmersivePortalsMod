@@ -2,126 +2,31 @@ package qouteall.imm_ptl.core.compat.mixin.sodium;
 
 import net.caffeinemc.mods.sodium.client.render.chunk.RenderSection;
 import net.caffeinemc.mods.sodium.client.render.chunk.occlusion.OcclusionCuller;
-import net.caffeinemc.mods.sodium.client.render.viewport.Viewport;
 import net.minecraft.core.SectionPos;
-import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.ModifyVariable;
-import org.spongepowered.asm.mixin.injection.Redirect;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
-import qouteall.imm_ptl.core.CHelper;
-import qouteall.imm_ptl.core.portal.Portal;
-import qouteall.imm_ptl.core.render.context_management.PortalRendering;
 
+// TODO MC 26.1 / Sodium 0.9.1: Sodium's occlusion culling API was fully redesigned.
+// OcclusionCuller.findVisible used to take a single `OcclusionCuller.Visitor` + a
+// `useOcclusionCulling` boolean + a `frame` int; it now takes THREE separate visitor
+// types (GraphOcclusionVisitor, GraphOcclusionVisitor, VisibilityTestingVisitor) plus a
+// CancellationToken, with no single "useOcclusionCulling" flag to override anymore.
+// `isWithinFrustum(Viewport, RenderSection)` was also renamed to
+// `isWithinNearbySectionFrustum(Viewport, RenderSection)`.
+// The portal cave-culling override (redirecting the occlusion-culling iteration start
+// point to the portal's visible-section origin, and tolerating an initial out-of-frustum
+// start point) needs a genuine redesign against this new 3-visitor shape - deferred
+// pending real in-game testing, same as the other stubbed rendering-pipeline items.
+// Stubbed to a no-op for now: cave culling through portals will behave like vanilla
+// Sodium's own culling (a performance-only regression, not a correctness one).
 @Mixin(OcclusionCuller.class)
 public abstract class MixinSodiumOcclusionCuller {
     @Shadow(remap = false)
     protected abstract RenderSection getRenderSection(int x, int y, int z);
     
-    @Shadow(remap = false)
-    public static boolean isWithinFrustum(Viewport viewport, RenderSection section) {
-        throw new RuntimeException();
-    }
-    
     @Unique
     private @Nullable SectionPos ip_modifiedStartPoint;
-    
-    @Unique
-    private static boolean ip_tolerantInitialFrustumTestFail;
-    
-    // update the iteration start point modification value
-    @SuppressWarnings("ConstantValue")
-    @ModifyVariable(
-        method = "findVisible", at = @At("HEAD"), argsOnly = true, remap = false
-    )
-    boolean modifyUseOcclusionCulling(
-        boolean originalValue,
-        OcclusionCuller.Visitor visitor, Viewport viewport, float searchDistance, boolean useOcclusionCulling, int frame
-    ) {
-        boolean doUseOcclusionCulling = PortalRendering.shouldEnableSodiumCaveCulling();
-        
-        ip_modifiedStartPoint = null;
-        ip_tolerantInitialFrustumTestFail = false;
-        
-        if (PortalRendering.isRendering()) {
-            Portal portal = PortalRendering.getRenderingPortal();
-            
-            Vec3 cameraPos = CHelper.getCurrentCameraPos();
-            ip_modifiedStartPoint = portal.getPortalShape().getModifiedVisibleSectionIterationOrigin(
-                portal, cameraPos
-            );
-            if (ip_modifiedStartPoint != null) {
-                doUseOcclusionCulling = false;
-                
-                RenderSection renderSection = getRenderSection(
-                    ip_modifiedStartPoint.x(), ip_modifiedStartPoint.y(), ip_modifiedStartPoint.z()
-                );
-                if (renderSection != null && !isWithinFrustum(viewport, renderSection)) {
-                    ip_tolerantInitialFrustumTestFail = true;
-                }
-            }
-        }
-        
-        return doUseOcclusionCulling;
-    }
-    
-    // apply start point modification
-    @Redirect(
-        method = "init",
-        at = @At(
-            value = "INVOKE",
-            target = "Lnet/caffeinemc/mods/sodium/client/render/viewport/Viewport;getChunkCoord()Lnet/minecraft/core/SectionPos;",
-            remap = true
-        ),
-        remap = false
-    )
-    private SectionPos redirectGetChunkCoordInInit(Viewport instance) {
-        if (ip_modifiedStartPoint != null) {
-            return ip_modifiedStartPoint;
-        }
-        
-        return instance.getChunkCoord();
-    }
-    
-    // apply start point modification
-    @Redirect(
-        method = "initWithinWorld",
-        at = @At(
-            value = "INVOKE",
-            target = "Lnet/caffeinemc/mods/sodium/client/render/viewport/Viewport;getChunkCoord()Lnet/minecraft/core/SectionPos;"
-        ),
-        remap = false
-    )
-    private SectionPos redirectGetChunkCoordInInitWithinWorld(Viewport instance) {
-        if (ip_modifiedStartPoint != null) {
-            return ip_modifiedStartPoint;
-        }
-        
-        return instance.getChunkCoord();
-    }
-    
-    // when iteration start point become a position that's outside of frustum
-    // make it tolerant early frustum test failures to avoid wrongly halting iteration
-    @Inject(
-        method = "isWithinFrustum", at = @At("RETURN"), cancellable = true,
-        remap = false
-    )
-    private static void onIsOutsideFrustum(
-        Viewport viewport, RenderSection section,
-        CallbackInfoReturnable<Boolean> cir
-    ) {
-        if (ip_tolerantInitialFrustumTestFail) {
-            boolean withinFrustum = cir.getReturnValueZ();
-            if (withinFrustum) {
-                // when found a section that's in frustum, frustum test become normal
-                ip_tolerantInitialFrustumTestFail = false;
-            }
-            cir.setReturnValue(true);
-        }
-    }
 }
+

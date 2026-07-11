@@ -1,5 +1,5 @@
 plugins {
-    id 'fabric-loom' version '1.8-SNAPSHOT'
+    id 'net.fabricmc.fabric-loom' version '1.17.13'
 
     id 'maven-publish'
 
@@ -31,8 +31,8 @@ repositories {
     }
 
     // cloth config
-    maven { url "https://maven.shedaniel.me/" }
-    maven { url "https://maven.terraformersmc.com/releases/" }
+    maven { url = "https://maven.shedaniel.me/" }
+    maven { url = "https://maven.terraformersmc.com/releases/" }
 
     // for sodium
     maven {
@@ -43,11 +43,6 @@ repositories {
         }
     }
 
-    // for parchment
-    maven {
-        url = "https://maven.parchmentmc.org"
-    }
-
     // for cardinal components that gravity changer uses
     maven {
         name = 'Ladysnake'
@@ -55,7 +50,7 @@ repositories {
     }
 
     // geckolib, for testing with portal gun
-    maven { url 'https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/' }
+    maven { url = 'https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/' }
 
 
 }
@@ -67,38 +62,37 @@ loom {
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
 
-    mappings loom.layered() {
-        officialMojangMappings() {
-            setNameSyntheticMembers(false)
-        }
-        parchment("org.parchmentmc.data:parchment-1.21:2024.07.28")
-    }
+    // Minecraft 26.1+ ships unobfuscated, so Loom no longer remaps anything and no
+    // mappings dependency (Yarn/Mojang/Parchment) is needed or available.
 
-    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 
-    modImplementation("net.fabricmc.fabric-api:fabric-api:${project.fabric_version}") {
+    implementation("net.fabricmc.fabric-api:fabric-api:${project.fabric_version}") {
         exclude module: "fabric-gametest-api-v1"
         // for now, the gametest module makes client unable to login dev env server
     }
 
-    modApi("me.shedaniel.cloth:cloth-config-fabric:${cloth_config_version}") {
+    api("me.shedaniel.cloth:cloth-config-fabric:${cloth_config_version}") {
         exclude(group: "net.fabricmc.fabric-api")
     }
     include "me.shedaniel.cloth:cloth-config-fabric:${cloth_config_version}"
 
-    modCompileOnly "maven.modrinth:modmenu:${modmenu_version}"
-    modLocalRuntime "maven.modrinth:modmenu:${modmenu_version}"
+    compileOnly "maven.modrinth:modmenu:${modmenu_version}"
+    localRuntime "maven.modrinth:modmenu:${modmenu_version}"
 
-    modCompileOnly "${project.sodium_path}"
+    compileOnly "${project.sodium_path}"
 
-    modCompileOnly "${project.iris_path}"
+    compileOnly "${project.iris_path}"
 
-    modCompileOnly("com.github.qouteall:GravityChanger:${gravity_changer_version}") {
+    compileOnly("com.github.qouteall:GravityChanger:${gravity_changer_version}") {
         exclude(group: "net.fabricmc.fabric-api")
-        transitive(false)
+        transitive = false
     }
 
-    modApi("com.github.iPortalTeam:DimLib:${dimlib_version}") {
+    // TODO BLOCKING: DimLib has no 26.1-compatible release yet (last release targets
+    // 1.21.1). This dependency is unconditional, so the project cannot build for
+    // 26.1 until DimLib itself is migrated to the non-obfuscated toolchain.
+    api("com.github.iPortalTeam:DimLib:${dimlib_version}") {
         exclude(group: "net.fabricmc.fabric-api")
     }
     include("com.github.iPortalTeam:DimLib:${dimlib_version}")
@@ -106,26 +100,26 @@ dependencies {
     // put these into inner mod to reduce duplicate MC jar
 
     if (project.enable_sodium.equals('true')) {
-        modLocalRuntime "${project.sodium_path}"
+        localRuntime "${project.sodium_path}"
     }
 
     if (project.enable_iris.equals('true')) {
-        modLocalRuntime "${project.iris_path}"
+        localRuntime "${project.iris_path}"
         implementation "org.anarres:jcpp:1.4.14" // for iris
         implementation 'io.github.douira:glsl-transformer:2.0.0-pre13' // for iris
         implementation 'org.antlr:antlr4-runtime:4.11.1' // for iris
     }
 
     if (project.enable_gravity_changer.equals('true')) {
-        modLocalRuntime("com.github.qouteall:GravityChanger:${gravity_changer_version}") {
+        localRuntime("com.github.qouteall:GravityChanger:${gravity_changer_version}") {
             exclude(group: "net.fabricmc.fabric-api")
         }
     }
 
     if (project.enable_geckolib.equals('true')) {
         // for testing portal gun using dev jar
-        modLocalRuntime('software.bernie.geckolib:geckolib-fabric-1.20:4.2') {
-            transitive(false)
+        localRuntime('software.bernie.geckolib:geckolib-fabric-1.20:4.2') {
+            transitive = false
         }
     }
 
@@ -144,7 +138,7 @@ dependencies {
 
             System.out.println("Found test mod: " + it.name.replace(".jar", "") + " -> " + name)
 
-            modImplementation name
+            implementation name
         }
     }
     testImplementation(platform('org.junit:junit-bom:5.10.0'))
@@ -160,7 +154,12 @@ processResources {
 }
 
 tasks.withType(JavaCompile).configureEach {
-    it.options.release = 17
+    it.options.release = 25
+    // Default javac caps error output at 100 per invocation, which hides errors
+    // during this migration (fixing a visible error just unmasks another one behind
+    // the cap instead of shrinking the visible count). Raise it so
+    // migration_tools/parse_compile_errors.py sees the true full error list.
+    it.options.compilerArgs << "-Xmaxerrs" << "5000"
 }
 
 java {
@@ -169,20 +168,21 @@ java {
     // If you remove this line, sources will not be generated.
     withSourcesJar()
 
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
-}
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
 
-
-// change the output file name
-remapJar {
-    afterEvaluate {
-        archiveFileName = "${project.archives_base_name}-${project.mod_version}-mc${project.minecraft_version}-fabric.jar"
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
     }
 }
 
 
 jar {
+    // change the output file name
+    afterEvaluate {
+        archiveFileName = "${project.archives_base_name}-${project.mod_version}-mc${project.minecraft_version}-fabric.jar"
+    }
+
     from("LICENSE") {
         rename { "${it}_${project.base.archivesName.get()}"}
     }
@@ -217,7 +217,7 @@ task printClasspath {
 //}
 
 publishMods {
-    file = remapJar.archiveFile
+    file = jar.archiveFile
     changelog = file("changelog.md").text
     type = ALPHA
     modLoaders.add("fabric")

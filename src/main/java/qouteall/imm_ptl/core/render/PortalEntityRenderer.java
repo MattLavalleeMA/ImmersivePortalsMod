@@ -5,10 +5,11 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import qouteall.imm_ptl.core.IPCGlobal;
 import qouteall.imm_ptl.core.IPGlobal;
 import qouteall.imm_ptl.core.mc_utils.WireRenderingHelper;
@@ -39,7 +40,7 @@ public class PortalEntityRenderer extends EntityRenderer<Portal> {
         }
     
         if (IPGlobal.debugRenderPortalShapeMesh && !PortalRendering.isRendering()) {
-            VertexConsumer lineVertexConsumer = bufferSource.getBuffer(RenderType.lines());
+            VertexConsumer lineVertexConsumer = bufferSource.getBuffer(RenderTypes.lines());
             WireRenderingHelper.renderPortalShapeMeshDebug(
                 matrixStack, lineVertexConsumer, portal
             );
@@ -49,7 +50,7 @@ public class PortalEntityRenderer extends EntityRenderer<Portal> {
     }
     
     @Override
-    public ResourceLocation getTextureLocation(Portal portal) {
+    public Identifier getTextureLocation(Portal portal) {
 //        if (portal instanceof BreakablePortalEntity) {
 //            if (((BreakablePortalEntity) portal).overlayBlockState != null) {
 //                return SpriteAtlasTexture.BLOCK_ATLAS_TEXTURE;
