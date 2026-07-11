@@ -1,19 +1,20 @@
 package qouteall.q_misc_util.dimension;
 
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Set;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+
+import org.jetbrains.annotations.Nullable;
+
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.IntTag;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
-import org.jetbrains.annotations.Nullable;
 import qouteall.q_misc_util.Helper;
-
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.Set;
-import java.util.function.Predicate;
-import java.util.stream.Collectors;
 
 public class DimIntIdMap {
     
@@ -117,7 +118,7 @@ public class DimIntIdMap {
         
         intids.keySet().forEach(dim -> {
             if (intids.contains(dim)) {
-                int intid = intids.getInt(dim);
+                int intid = intids.getIntOr(dim, 0);
                 ResourceKey<Level> dimId = Helper.dimIdToKey(dim);
                 toIntegerId.put(dimId, intid);
                 fromIntegerId.put(intid, dimId);

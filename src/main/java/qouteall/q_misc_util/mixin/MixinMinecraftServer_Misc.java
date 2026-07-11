@@ -28,7 +28,7 @@ import java.util.concurrent.Executor;
 @Mixin(MinecraftServer.class)
 public abstract class MixinMinecraftServer_Misc extends ReentrantBlockableEventLoop implements IEMinecraftServer_Misc {
     public MixinMinecraftServer_Misc(String string) {
-        super(string);
+        super(string, false);
         throw new RuntimeException();
     }
     

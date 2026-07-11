@@ -264,20 +264,23 @@ compositing, not assume a single shared framebuffer+stencil-buffer for the whole
 for the live count. **`build.gradle` now passes `-Xmaxerrs 5000` to javac** (added
 in Round 13) so the reported count is the TRUE full error count, not capped at ~100
 per invocation like earlier rounds believed — always re-baseline after this change,
-don't compare against pre-Round-13 numbers. As of the latest run: **303 errors / 110
-distinct symbols** — a **54% reduction** from the 665/152 true baseline established
-when `-Xmaxerrs` was first added, all fixed in one continuous session (Rounds 13-15)
-via mechanical/API-shape fixes with zero architecture redesigns needed. Progression:
+don't compare against pre-Round-13 numbers. As of the latest run: **277 errors / 103
+distinct symbols** — a **58% reduction** from the 665/152 true baseline established
+when `-Xmaxerrs` was first added. Progression:
 665/152 → 589/150 (`getNormal()` cluster) → 543/141 (`method does not override`
 batch) → 349/119 (large sweep: `server`/`getServer()`, `isClientSide`,
 `displayClientMessage`, `registryOrThrow`, `playS2C`/`playC2S`, `cameraEntity`,
 `RenderType.lines()`, `worldGenOptions()`, `hasPermissions` stragglers,
-`Direction.fromDelta`, Sodium `getOrigin()`, packet record reshape) → **303/110**
+`Direction.fromDelta`, Sodium `getOrigin()`, packet record reshape) → 303/110
 (further sweep: `GameProfile.getId/getName`, `Entity.startRiding`, `ChunkPos` `x`/`z`
 stragglers, `ClickEvent` sealed-record subtypes, `Entity.lerpTo`→`snapTo`,
 `StringTag.getAsString()`→`.value()`, `ListTag.getElementType()` removal,
 `StringWidget.alignCenter()` removal, `Entity.createCommandSourceStack()`→
-`createCommandSourceStackForNameResolution(ServerLevel)`). The total error count is
+`createCommandSourceStackForNameResolution(ServerLevel)`) → **277/103** (full
+resolution of the `method does not override or implement a method from a
+supertype` cluster — see "Still remaining" below for the 3 distinct root causes
+fixed, including the two deferred architectural items, `SavedData`→Codec and
+`EntityRenderer<T,S>`). The total error count is
 a meaningful, shrinking progress signal — trust it. Full detail on every fix in
 `/memories/session/mc26.1-migration.md` Round 15 (session memory, not duplicated
 here to keep this doc from growing unbounded — this doc tracks current-state
@@ -808,76 +811,478 @@ has now also mostly been fixed, in order:
   `.deltaMovement()` → `Vec3`, `.yRot()`/`.xRot()` floats) instead of flat x/y/z/
   yaw/pitch fields. Fixed via `packet.change().position().x/.y/.z`.
 
-**Still remaining** (re-run `python migration_tools/parse_compile_errors.py --run`
-for the live list; last full run: **303 errors / 110 distinct symbols**, down from
-the 665 true baseline established in Round 13 — a 54% reduction):
+**Resolved in this cluster** (previously tracked here as "still remaining" — moved
+out of that list since all of it is now fixed; see "Priority order for next
+session(s)" below for the actual current remaining-error list/counts, which
+supersedes the stale 277/103 baseline this sub-section was originally written
+against):
 
-- **`method does not override or implement a method from a supertype`** (12 errors,
-  unchanged from before — `CommandStickItem.java`, `GlobalPortalStorage.java`,
-  `LoadingIndicatorRenderer.java`) — `GlobalPortalStorage.java` is the deferred
-  `SavedData`→Codec architectural item (see above); `LoadingIndicatorRenderer.java`/
-  `PortalEntityRenderer.java` are the deferred `EntityRenderer<T,S>` redesign (item
-  3 below, also responsible for the separate `wrong number of type arguments;
-  required 2` cluster, 5 errors); `CommandStickItem.java` has a second, different
-  override issue beyond the already-fixed `appendHoverText` — not yet investigated.
-- **`incompatible types: Entity cannot be converted to class_1297` / `Direction
-  cannot be converted to class_2350`** (10+4 errors, `GravityChangerInterface.java`)
-  — confirmed genuinely stale external mod dependency, not an in-repo fix. Leave
-  for last.
-- **`incompatible types: CompoundTag cannot be converted to ValueOutput/ValueInput`
-  / `Optional<String> cannot be converted to String`** (8+4+6 errors,
-  `GlobalPortalStorage.java`, `McHelper.java`, `PortalCommand.java`,
-  `MiscNetworking.java`, `PortalWandItem.java`) — the `GlobalPortalStorage.java`
-  instances are part of the deferred SavedData item; the others may be independent
-  leftover `ValueInput`/`ValueOutput`-family spots not yet investigated.
-- **`incompatible types: ResourceKey<DimensionType> cannot be converted to
-  class_5321<class_2874>` / `Identifier cannot be converted to class_2960`** (8+8
-  errors, `AlternateDimensions.java`) — obfuscated-name leaks in this mod's OWN
-  code (not an external dependency like GravityChanger) — **still not checked**
-  whether this is a stale Mixin `@Shadow`/mapping mismatch fixable in-repo; flagged
-  across 2 rounds now as needing this check.
-- **`getId()`/`getName()`** (6+6 errors, `CHelper.java`, `ImmPtlNetworkConfig.java`,
-  `O_O.java`) — not yet investigated.
-- **`no suitable method found for startRiding(Entity,boolean)`** (6 errors,
-  `ClientTeleportationManager.java`, `MixinServerPlayer.java`,
-  `ServerTeleportationManager.java`) — mount API signature change, not yet
-  investigated.
-- **`depthMask(boolean)`** (6 errors, `RendererUsingStencil.java`) — GL state
-  management API change, related to item 2's rendering-pipeline rewrite.
-- **`incompatible types: ClientboundPlayerPositionPacket cannot be converted to
-  IEPlayerPositionLookS2CPacket`** (4 errors, `MixinClientPacketListener.java`,
-  `MixinServerGamePacketListenerImpl.java`) — likely the duck-interface cast for
-  the packet record needs updating alongside the `getX/getY/getZ` fix just applied.
-- **`x`/`z` has private access in `ChunkPos`** (4+4 errors, `ErrorTerrainGenerator.java`,
-  `MixinTrackedEntity.java`) — leftover `ChunkPos` record-shape stragglers (same
-  fix as the earlier `ChunkPos` cluster, `.x`/`.z` fields → `.x()`/`.z()` methods,
-  just missed in these 2 files).
-- **`constructor ReentrantBlockableEventLoop ... cannot be applied`** (4 errors,
-  `MixinMinecraftServer_Misc.java`, `MixinMinecraft_RedirectedPacket.java`) — ctor
-  signature change, not yet investigated.
-- Smaller remaining items (2-5 errors each, not yet investigated): `wrong number of
-  type arguments; required 2` (the `EntityRenderer<T,S>` item, item 3 below),
-  `ChatComponent.addMessage`, `invalid method reference`, `getProjectionMatrix()`,
-  `Optional<Integer>`/`Optional<Long> cannot be converted to int/long`,
-  `ClickEvent is abstract` (still not investigated since Round 12),
-  `lerpTo(double,double,double,float,float,int)`, `createCommandSourceStack()`,
-  `getAsString()`, `getElementType()`, `alignCenter()`.
+- **`method does not override or implement a method from a supertype`**: DONE (all
+  12 errors resolved, 3 unrelated root causes):
+  - `CommandStickItem.java`: `Item.getDescriptionId(ItemStack)` no longer exists —
+    `Item.getDescriptionId()` is now `final` and no-arg (per-`Item`, not per-`ItemStack`).
+    The per-stack customization point moved to overriding `Item.getName(ItemStack)`
+    (returns `Component` directly, not a translation-key `String`) instead. Fixed by
+    replacing the override with `getName(ItemStack)` returning
+    `Component.translatable(data.nameTranslationKey)` (falls back to
+    `super.getName(stack)` when the item has no `Data` component).
+  - `LoadingIndicatorEntity.java`: simply hadn't received the `hurtServer(ServerLevel,
+    DamageSource, float)` override other entities got in the `ValueInput`/`ValueOutput`
+    round (see that section above) — added the same `return false` stub.
+  - `GlobalPortalStorage.java` (the deferred `SavedData`→Codec item): **DONE**.
+    Confirmed via decompiled source (`WeatherData.java`/`MapItemSavedData.java` as
+    reference examples) that `SavedData` is now a bare marker base class (only
+    `setDirty()`/`isDirty()`, no persistence methods at all) — a `SavedDataType<T>`
+    record (`Identifier id, Supplier<T> constructor, Codec<T> codec, DataFixTypes`)
+    is registered instead, and `SavedDataStorage.computeIfAbsent(SavedDataType<T>)`
+    replaces the old `Factory`-based `computeIfAbsent(Factory<T>, String)`. The
+    genuine design problem (codec decode has no `ServerLevel` to spawn live `Portal`
+    entities into) was solved with a thin bridge, same pattern as the earlier
+    `Portal`/`ValueInput`/`ValueOutput` fix: `CODEC = CompoundTag.CODEC.xmap(...)`
+    wraps the *exact* pre-existing `CompoundTag`-shaped save format (renamed
+    `save(CompoundTag, HolderLookup.Provider)` → `toSyncTag(CompoundTag)`, dropped
+    the always-unused `registries` param) — decode just stashes the raw
+    `CompoundTag` into a new no-arg-constructed instance's `pendingNbt` field; actual
+    portal-entity spawning is deferred until `get(ServerLevel)` binds the instance to
+    its real world (`bindToWorld`), which resolves `pendingNbt` via the existing
+    `fromNbt(CompoundTag)` method unchanged. `world` field became non-final
+    (previously set once in the constructor, now set by `bindToWorld` on first
+    `get()`). Net effect: the entire nested `CompoundTag` portal-serialization tree
+    (and the network-sync path, which reuses `toSyncTag`) needed zero changes — only
+    the outer `SavedData` registration/lookup shape changed. Note: this does change
+    the on-disk storage file's identity (now keyed by the `Identifier`
+    `immersive_portals:global_portal` via `SavedDataType`, rather than the old
+    bare-string `"global_portal"` key) — an unavoidable consequence of the API
+    redesign, not preserved on purpose.
+  - `LoadingIndicatorRenderer.java`/`PortalEntityRenderer.java` (the deferred
+    `EntityRenderer<T,S>` redesign, item 3 below): **DONE** (compiles; portal-content
+    drawing itself remains gated on item 2's runtime redesign, same as before).
+    Confirmed via decompiled source (`EntityRenderer.java`/`EntityRenderState.java`/
+    `ArrowRenderer.java`) that `render(T, float, float, PoseStack, MultiBufferSource,
+    int)` no longer exists at all — replaced by the same CPU-extract/GPU-submit split
+    used everywhere else in this rewrite: `createRenderState()` (builds a fresh `S
+    extends EntityRenderState`), `extractRenderState(T entity, S state, float
+    partialTicks)` (reads live entity/world data into the state — still has the live
+    entity), and `submit(S state, PoseStack, SubmitNodeCollector, CameraRenderState)`
+    (the actual draw-call submission point, only has the extracted state, not the
+    live entity). `getTextureLocation(T)` no longer exists on `EntityRenderer` at all
+    (confirmed via decompiled source and grepping the base class's method list) —
+    both overrides (which only ever returned `null`) were dead code, deleted outright.
+    `LoadingIndicatorRenderer`: its old `render()` body was already fully commented
+    out (dead code) — reduced to a minimal `EntityRenderState`-only renderer with no
+    custom override needed.
+    `PortalEntityRenderer`: `renderPortalInEntityRenderer(Portal)` (the actual portal
+    -content draw hook, one of the item-2 rendering-pipeline stubs) only ever took the
+    live `Portal`, not any of `render()`'s other params, so it needed to move to
+    `submit()` (the timing-equivalent replacement for the old immediate `render()`
+    call, still receiving a `PoseStack` matching the entity's transform) via a new
+    `PortalRenderState` subclass that carries a `public Portal portal` field set in
+    `extractRenderState`. The debug portal-shape-mesh wireframe (`WireRenderingHelper
+    .renderPortalShapeMeshDebug`, unrelated to the item-2 stubs, still fully
+    functional) needed a `MultiBufferSource`-shaped `VertexConsumer` at submit time —
+    found `SubmitNodeCollector.submitCustomGeometry(PoseStack, RenderType,
+    CustomGeometryRenderer)` (`CustomGeometryRenderer.render(PoseStack.Pose,
+    VertexConsumer)` callback) as the new sanctioned mechanism for arbitrary
+    immediate-mode geometry, and used it to keep calling the existing helper
+    unchanged. `OverlayRendering.onRenderPortalEntity`/`renderBreakablePortalOverlay`
+    had their `MultiBufferSource` param dropped entirely (confirmed unused — the only
+    body, `renderBreakablePortalOverlay`, is already a stubbed no-op per the
+    `BakedQuad` redesign item above) rather than inventing a fake one.
 
-Recommended approach next session: the mechanical/API-rename-shaped items above
-(`getId()`/`getName()`, `startRiding`, `ChunkPos` `x`/`z` stragglers,
-`ReentrantBlockableEventLoop` ctor, `ClickEvent`) are likely all quick wins similar
-to this round's sweep — investigate each via `inspect_class.py`/`javap` on the
-relevant class first, don't guess. Leave the confirmed-external-dependency items
-(`GravityChangerInterface.java`) for last. Still need to determine whether
-`AlternateDimensions.java`'s obfuscated-name leaks are in-repo-fixable (flagged
-twice now, never actually checked). The `SavedData`→Codec redesign
-(`GlobalPortalStorage.java`) and `EntityRenderer<T,S>` redesign
-(`LoadingIndicatorRenderer.java`/`PortalEntityRenderer.java`) both need dedicated
-research/design sessions, not quick mechanical fixes — track them as their own
-items alongside item 2/3 below. Re-run `parse_compile_errors.py --run` after each
-batch.
+(The rest of the bullets formerly listed here — `getId()`/`getName()`, `startRiding`,
+`ChunkPos` `x`/`z` stragglers, `ClickEvent`, the `GlobalPortalStorage.java`
+`ValueInput`/`ValueOutput` stragglers — were also fixed in subsequent rounds; see the
+progression note above and "Priority order for next session(s)" below for what
+*actually* remains. `GravityChangerInterface.java` and `AlternateDimensions.java`
+are re-classified there too (both confirmed external/blocked, not in-repo fixable).
+`ReentrantBlockableEventLoop` (`MixinMinecraftServer_Misc.java`,
+`MixinMinecraft_RedirectedPacket.java`) is carried forward into the "medium
+clusters" priority item below — still unfixed, ctor signature change, not yet
+investigated.)
+
+### Priority order for next session(s) (established after a full-landscape review)
+
+As of the latest run: **91 errors / 31 distinct symbols** (down from 665/152 true
+baseline — a 86% reduction). Full changelog of completed rounds is below the
+priority list (kept out of the priority list itself since none of it is
+still-to-do). **The priority list further down is the only part of this
+sub-section that reflects actual remaining work — everything above it is a
+completed-work changelog, kept for reference/context only.**
+
+**Priority order for remaining work:**
+
+1. **`MixinGameRenderer.java` weave-time-only breakage (not a compile error)**:
+   `GameRenderer.renderItemInHand` changed signature shape (`CameraRenderState`/
+   `Matrix4fc` instead of `Camera`/`Matrix4f`), which breaks this file's
+   pre-existing `onRenderHandBegins`/`onRenderHandEnds` `@Inject` hooks at Mixin
+   weave time (not caught by `compileJava`) — these track a `portal_isRenderingHand`
+   flag; needs its own fix pass since it isn't guessable without checking real
+   in-game behavior of the new hand-rendering flow.
+2. **`net.minecraft.gizmos` debug-drawing system (newly discovered, not yet
+   investigated)**: vanilla's old `LevelRenderer.renderLineBox(...)` convenience
+   helper was removed outright (not renamed) — a `LineGizmo` class exists in a
+   brand-new `net.minecraft.gizmos` package that appears to be vanilla's own
+   replacement debug-drawing API. Worked around narrowly so far (see changelog) by
+   hand-rolling the one needed helper directly via `VertexConsumer` calls — if more
+   vanilla debug-drawing helpers turn out to be missing elsewhere, the real Gizmo
+   API should be investigated properly instead of continuing to hand-roll
+   replacements one at a time.
+3. **Leave for absolute last (confirmed external/blocked, not in-repo fixable)**:
+   `GravityChangerInterface.java` (16 errors, archived/dead upstream dependency,
+   disabled by default) and `AlternateDimensions.java` (16 errors, blocked on the
+   `DimLib` migration — see "Blocking / external dependency issues" above). Also
+   confirmed the same DimLib root cause now affects 4 more files thought to be
+   independently fixable: `EntitySync.java` (1 error), `ImmPtlChunkTickets.java`
+   (1 error, its *other* error — the `Identifier.of` one — was independently
+   mechanical and already fixed), `ImmPtlChunkTracking.java` (1 error), and
+   `ClientWorldLoader.java` (1 error, its `DimensionAPI.CLIENT_DIMENSION_UPDATE_EVENT
+   .register(...)` call — all its *other* errors were independently mechanical and
+   already fixed) — all register a `qouteall.dimlib.api.DimensionAPI` event whose
+   functional-interface parameter type is DimLib's own stale-mappings-compiled
+   `ServerLevel`, causing an
+   "invalid method reference"/"cannot access class_3218" against our real
+   `ServerLevel`-typed handler methods. Grep for `qouteall.dimlib` imports to find
+   more of these proactively rather than waiting for them to surface one at a time.
+
+**With this round, every genuinely mechanical/in-repo-fixable compile-error cluster
+is done.** The only compile errors left (91) are: confirmed-external/DimLib-blocked
+(items above, ~36 errors) and the still-stubbed portal-rendering-pipeline pieces
+tracked under item 2 below (runtime work, not compile-error-driven anymore per its
+own section). Re-run `parse_compile_errors.py --run` to confirm before starting a
+new session — the remaining count should now be dominated by external blockers
+rather than in-repo work.
+
+Re-run `parse_compile_errors.py --run` after each batch, and always diff the
+touched-file error list before/after (as done every round so far) to catch
+regressions immediately rather than trusting the aggregate count alone.
+
+---
+
+**Changelog — P1 medium-cluster round (221 → 167 errors, 84 → 61 symbols), all
+fixed, zero regressions (verified by diffing every touched file's error list
+before/after):**
+
+- **Fabric API attachment-sync redesign**: `AttachmentChange.partitionAndSendPackets
+  (List<AttachmentChange>, ServerPlayer)` (a Fabric-internal method, package
+  `net.fabricmc.fabric.impl.attachment.sync`) no longer exists on `AttachmentChange`
+  at all — moved to `AttachmentSync.trySync(List<AttachmentChange>, ServerPlayer)`
+  (confirmed via `javap` on the nested `fabric-data-attachment-api-v1` jar, extracted
+  from the outer Fabric API "jar of jars" the same way prior rounds did). Fixed in
+  `PlayerChunkLoading.java`.
+- **`Identifier.of(String,String)` removed** — renamed to
+  `Identifier.fromNamespaceAndPath(String,String)` (confirmed via `javap`; `Identifier`
+  gained several other named factories too — `parse`/`tryParse`/`withDefaultNamespace`/
+  `bySeparator` — but this exact 2-arg shape maps 1:1 to `fromNamespaceAndPath`).
+  Fixed in `ImmPtlChunkTickets.java`.
+- **`Entity.canChangeDimensions(Level,Level)` removed, renamed to
+  `Entity.canTeleport(Level,Level)`** (confirmed via decompiled source — same exact
+  signature, just renamed as part of the new `TeleportTransition`-based
+  cross-dimension teleport rewrite). Fixed in `ServerTeleportationManager.java`.
+- **`Entity.moveTo(double,double,double,float,float)`/`Entity.moveTo(double,double,double)`
+  removed, renamed to `Entity.snapTo(...)`** (same signatures, confirmed via
+  decompiled source and `javap` — part of the same rename family as the
+  already-completed `Entity.lerpTo`→`snapTo`). `Entity.absMoveTo(...)` similarly
+  renamed to `Entity.absSnapTo(...)`. Fixed in `ServerTeleportationManager.java`,
+  `ImmPtlNetworking.java`, `MixinServerGamePacketListenerImpl.java`.
+- **`ServerLevel.getSharedSpawnPos()` removed** — spawn position moved into a new
+  `LevelData.RespawnData` record (`dimension()`/`pos()`/`yaw()`/`pitch()` accessors,
+  replacing several separate fields); fix is `level.getRespawnData().pos()`. Fixed in
+  `ServerTeleportationManager.java`.
+- **Fabric API `PayloadTypeRegistry`/networking renames** (same "S2C/C2S" →
+  "clientbound/serverbound" rename family already applied to the play-phase
+  registry in an earlier round, now swept for the configuration phase and for
+  `ClientPlayNetworking` too): `PayloadTypeRegistry.configurationS2C()`/
+  `.configurationC2S()` → `.clientboundConfiguration()`/`.serverboundConfiguration()`;
+  `ClientPlayNetworking.createC2SPacket(...)` → `.createServerboundPacket(...)`;
+  `ServerConfigurationNetworking.Context.networkHandler()` → `.packetListener()`.
+  Fixed in `ImmPtlNetworkConfig.java`, `ClientTeleportationManager.java`,
+  `ImplRemoteProcedureCall.java` (confirmed via `javap` on the nested
+  `fabric-networking-api-v1` jar).
+- **`FriendlyByteBuf.writeResourceLocation`/`readResourceLocation` renamed to
+  `writeIdentifier`/`readIdentifier`** (matches the overall `ResourceLocation`→
+  `Identifier` rename theme already applied everywhere else). Fixed in
+  `ImplRemoteProcedureCall.java`.
+- **`ChatComponent.addMessage(Component)` removed entirely** — split into
+  `addClientSystemMessage(Component)` (client-generated diagnostic messages, used
+  here) and `addServerSystemMessage(Component)`/`addPlayerMessage(...)` (confirmed
+  via `javap`). Fixed in `ImplRemoteProcedureCall.java`, `CHelper.java`.
+- **`ReentrantBlockableEventLoop(String)` ctor gained a required trailing `boolean`**
+  (confirmed via decompiled `Minecraft`/`MinecraftServer` source: `super("Client",
+  true)` / `super("Server", propagatesCrashes)`). Both of this mod's mixin classes
+  that extend it purely to satisfy Mixin's bytecode-merging requirements (their
+  constructors are never actually invoked — `MixinMinecraftServer_Misc`'s explicitly
+  throws right after `super(...)`) just needed a filler boolean added: `true` for
+  `MixinMinecraft_RedirectedPacket` (mirroring `Minecraft`'s own hardcoded `true`),
+  `false` for `MixinMinecraftServer_Misc` (value is irrelevant, dead code).
+- **`ClientboundPlayerPositionPacket` becoming a `record` breaks the classic Mixin
+  duck-interface cast trick**: records are implicitly `final`, and per JLS 5.5 javac
+  statically rejects casting a `final`-typed reference to an unrelated interface
+  unless that class's own (visible-to-javac) declaration implements it — which a
+  Mixin-added `implements` doesn't satisfy since Mixin's bytecode weaving happens
+  after javac runs. **General fix for this exact situation**: cast through `Object`
+  first (`(IEPlayerPositionLookS2CPacket) (Object) packet`) — legal because the
+  final-class restriction doesn't apply transitively through an intermediate cast to
+  `Object`. Fixed at both real cast sites (`MixinClientPacketListener.java`,
+  `MixinServerGamePacketListenerImpl.java`) — the cast from `this` inside the actual
+  mixin class implementing the interface didn't need this (non-final source type).
+  Separately, `ClientboundPlayerPositionPacket`'s canonical constructor reshaped from
+  `(double,double,double,float,float,Set<Relative>,int)` to `(int teleportId,
+  PositionMoveRotation change, Set<Relative> relatives)` (position/rotation delta
+  fields folded into a shared `PositionMoveRotation(Vec3 position, Vec3
+  deltaMovement, float yRot, float xRot)` record, `deltaMovement` set to `Vec3.ZERO`
+  since this mod's teleport packet never had a velocity-delta concept). Fixed in
+  `MixinServerGamePacketListenerImpl.java`. **Not yet investigated**: the packet's
+  own `write(FriendlyByteBuf)`/`<init>(FriendlyByteBuf)` methods (targeted by 2
+  `@Inject`s in `MixinPlayerPositionLookS2CPacket.java`/
+  `MixinClientboundPlayerPositionPacket.java` to smuggle the extra dimension field
+  over the wire) no longer exist at all on the record — serialization is now
+  entirely via the static `STREAM_CODEC` field. These 2 `@Inject`s target
+  nonexistent methods, which (per the established pattern for Mixin `method=`
+  targets) isn't caught by `compileJava`, only at weave time/game launch. Needs a
+  genuine redesign (wrap/redirect the `STREAM_CODEC` itself) — flagged, not
+  attempted, since it's weave-time-only-verifiable.
+- **`ChunkMap.TrackedEntity.broadcastAndSend(Packet)` renamed to
+  `sendToTrackingPlayersAndSelf(Packet<? super ClientGamePacketListener>)`**
+  (confirmed via `javap` — the class also gained `sendToTrackingPlayers`/
+  `sendToTrackingPlayersFiltered` variants; `...AndSelf` is the closest match to the
+  old broadcast-and-send-to-owner semantics). This also required widening
+  `McHelper.sendToTrackers(Entity, Packet<?>)`'s own parameter type to `Packet<?
+  super ClientGamePacketListener>` to satisfy the new method's bound — verified all
+  3 existing call sites already pass compatible packet types. Fixed in
+  `McHelper.java`.
+- **`Entity.saveWithoutId`/`.load` `CompoundTag`→`ValueOutput`/`ValueInput`
+  stragglers**: same `TagValueInput`/`TagValueOutput` bridge established in the
+  previous round, applied to one more call site (`McHelper.copyEntity`). Fixed in
+  `McHelper.java`.
+- **`ActiveProfiler.WARNING_TIME_NANOS`**: the field itself still exists unchanged —
+  this was just a missing `import net.minecraft.util.profiling.ActiveProfiler;`
+  (confirmed via `javap` that the field is present and public), not an API change at
+  all. Fixed in `PortalDebugCommands.java`.
+
+**Changelog — `MyGameRenderer.java` round (167 → 131 errors, 61 → 49 symbols), all
+36 errors in this one file resolved, zero regressions:**
+
+`MyGameRenderer.java` mirrors vanilla's own `GameRenderer`/`FogRenderer`/`Lighting`,
+and turned out to be a genuine mechanical-fix cluster after all (not deferred
+runtime work), despite superficially resembling the already-deferred rendering
+-pipeline item — every symbol had a real, confirmable replacement:
+- **`GameRenderer` gained a CPU-extract/GPU-render split**, same pattern as
+  `EntityRenderer<T,S>`/GUI elsewhere in this migration: new `extract(DeltaTracker,
+  boolean)`/`render(DeltaTracker, boolean)` methods, with `renderLevel(DeltaTracker)`
+  (still directly callable, used unchanged by this mod) now internally reading from
+  a pre-populated `GameRenderState` snapshot rather than fresh mutable globals. Not
+  otherwise consequential for this file's fix (nothing here needed to call
+  `extract`/`render` directly), but worth knowing this exists for the still-open
+  portal-rendering-algorithm item (item 2 below), since it explains *why* so much of
+  `GameRenderer`'s old imperative API surface disappeared.
+- **`RenderSystem.getProjectionMatrix()`/`GameRenderer.resetProjectionMatrix(Matrix4f)`
+  removed** — the projection matrix is now GPU-buffer-backed
+  (`RenderSystem.getProjectionMatrixBuffer()`), not a plain CPU `Matrix4f`, so it can
+  no longer be captured/restored by value at all. `RenderSystem` itself now provides
+  a purpose-built replacement for exactly this save/restore use case:
+  `RenderSystem.backupProjectionMatrix()`/`.restoreProjectionMatrix()` (confirmed via
+  `javap`) — removed the local `oldProjectionMatrix` variable entirely in favor of
+  this pair.
+- **`RenderSystem.applyModelViewMatrix()` removed**, no replacement needed — the
+  model-view matrix is read live from `RenderSystem.getModelViewStack()` at draw
+  time now (confirmed via decompiled source), there's no separate "apply to shader
+  state" step left to call. Removed both call sites with a `TODO` note. Also
+  confirmed (but did not change, since it wasn't a compile error) that
+  `RenderSystem`'s `modelViewStack` field became `private static final` — the
+  existing `IERenderSystem` `@Mutable`-`@Accessor` swap-the-whole-stack-instance
+  trick this mod uses to save/restore it still compiles (Mixin's `@Mutable` permits
+  writing `final` fields), but swapping the canonical stack *instance* out for a
+  fresh one is in tension with the new design's apparent intent of a single
+  always-live shared instance — flagged as a semantic risk worth revisiting, not
+  addressed now since it isn't a compile error.
+- **`Minecraft.getTimer()` renamed to `getDeltaTracker()`** (return type changed
+  `Timer`→`DeltaTracker` to match `GameRenderer.renderLevel(DeltaTracker)`'s param
+  type exactly).
+- **`GameRenderer.getDarkenWorldAmount(float)` renamed to
+  `getBossOverlayWorldDarkening(float)`** (confirmed via `javap`; same purpose/shape).
+- **`EntityRenderDispatcher.prepare(ClientLevel, Camera, Entity)` dropped the
+  `ClientLevel` param** — now just `prepare(Camera, Entity)` (confirmed via `javap`).
+- **`GameRenderer.setRenderHand(boolean)`/the backing `renderHand` field removed
+  entirely** (confirmed via `javap --private` — not just made inaccessible, gone).
+  Since `IEGameRenderer`'s existing duck (`ip_getDoRenderHand()`) already
+  `@Shadow`ed this exact field (previously working, now silently broken at Mixin
+  weave time only — see the `MixinGameRenderer.java` item in the priority list
+  above), converted it to a self-contained `@Unique` field on `MixinGameRenderer`
+  and added a matching `ip_setDoRenderHand(boolean)` to both the duck interface and
+  its implementation. This fixes the compile-time contract cleanly, but doesn't by
+  itself make hand-rendering actually respect the flag again — that also needs the
+  separate `renderItemInHand` signature-mismatch fix tracked in the priority list.
+- **`BlockEntityRenderDispatcher.level` field removed with no replacement**
+  (reconfirmed — same finding as the P1 round's `ClientTeleportationManager` fix).
+  Stubbed out with a `TODO` at both call sites (set-before/restore-after), same
+  precedent.
+- **`ClientLevel.effects()` (and the entire `DimensionSpecialEffects` class) removed
+  outright** — confirmed via decompiled-source grep across the whole tree that
+  `DimensionSpecialEffects`, `isFoggyAt`, and `constantAmbientLight` don't exist
+  anywhere in the new source at all, not just relocated. Both real usages
+  (`resetFogState`/`resetDiffuseLighting`) had clean, confirmable replacements
+  once the surrounding APIs were understood, detailed below — this was **not** a
+  dead end requiring a stub.
+- **`FogRenderer` redesigned from static methods to an `AutoCloseable` instance**
+  (one instance per `GameRenderer`, exposed only via a private field — added
+  `IEGameRenderer.ip_getFogRenderer()` following the same duck-accessor convention
+  already used for `ip_getLightmap()` etc.). `FogRenderer.setupFog(Camera camera,
+  int renderDistanceInChunks, DeltaTracker, float darkenWorldAmount, ClientLevel)`
+  (confirmed via decompiled source) now returns a `FogData` object and **computes
+  fogginess internally** from the camera's current fluid/block context — the old
+  external `isFoggyAt(...)`/boss-fog-overlay boolean input is gone because it's no
+  longer needed as an input at all. Actual GPU upload is a separate explicit step,
+  `fogRenderer.updateBuffer(FogData)`. `FogMode.FOG_TERRAIN` doesn't exist either —
+  the enum shrank to just `NONE`/`WORLD` (confirmed via decompiled source), `WORLD`
+  being the correct replacement. `FogRenderer.levelFogColor()` (the old static
+  color-only getter) has no direct equivalent — folded into the same
+  `setupFog`+`updateBuffer` pair instead. `resetFogState()`/`updateFogColor()`
+  rewritten around this new shape (both currently dead code — verified via
+  workspace-wide grep that nothing calls either method — so this is lower-risk than
+  it looks, but written as a faithful, real translation rather than a stub since a
+  confident one was possible).
+- **`Lighting` redesigned from static methods to an `AutoCloseable` instance**
+  (via `GameRenderer.getLighting()`, a real public method, no duck needed) — old
+  `Lighting.setupLevel()`/`.setupNetherLevel()` collapsed into a single
+  `instance.updateLevel(CardinalLighting.Type)` (confirmed via `javap`).
+  `DimensionSpecialEffects.constantAmbientLight()`'s old boolean role is now
+  covered directly by a new `DimensionType.cardinalLightType()` accessor
+  (`CardinalLighting.Type.DEFAULT`/`.NETHER`, confirmed via `javap`) — since the
+  dimension type declares its own lighting mode directly now, `resetDiffuseLighting()`
+  simplified from an if/else into one line:
+  `client.gameRenderer.getLighting().updateLevel(world.dimensionType().cardinalLightType())`.
+
+**Changelog — `ClientWorldLoader`/`MixinLevelRenderer` round (131 → 113 errors,
+49 → 40 symbols), all resolved except 1 reclassified as DimLib-blocked, zero
+regressions:**
+
+- **`LevelRenderer`'s constructor gained 2 new trailing params**: `GameRenderState`
+  and `FeatureRenderDispatcher` (confirmed via `javap`), both per-`GameRenderer`
+  singletons (not per-`LevelRenderer` state) — reused from the single client
+  `GameRenderer` instance via its own public `getGameRenderState()`/
+  `getFeatureRenderDispatcher()` getters, the same way this constructor call
+  already reused `EntityRenderDispatcher`/`BlockEntityRenderDispatcher` from
+  `Minecraft`. Fixed in `ClientWorldLoader.createSecondaryClientWorld`.
+- **`LevelRenderer.tick()` gained a required `Camera` param** (confirmed via
+  `javap`; only used internally for spawning nearby weather particles, per
+  decompiled source) — passed the main camera as an approximation since this mod
+  doesn't track a separate camera for background (currently-not-being-viewed)
+  dimensions' renderers; cosmetic-only risk (misplaced weather particles for
+  off-screen dimensions), not correctness-critical.
+- **`Registry<T>`/`HolderLookup.RegistryLookup<T>`'s `getHolderOrThrow(ResourceKey)`
+  renamed to `getOrThrow(ResourceKey)`** (confirmed via `javap` on the
+  `HolderGetter<T>` superinterface — same shape, `getOrThrow` is a `default` method
+  there now). Fixed in `ClientWorldLoader.createSecondaryClientWorld`.
+- **`ClientLevel`'s constructor reshaped**: dropped its `Supplier<ProfilerFiller>`
+  param entirely (consistent with `Profiler.get()` becoming a static thread-local
+  accessor elsewhere in this migration — no per-instance profiler supplier needed
+  anymore) and gained a new trailing `int seaLevel` param (confirmed via decompiled
+  source: vanilla's own `ClientPacketListener.handleLogin` sources this from
+  `CommonPlayerSpawnInfo.seaLevel()`, which isn't available when constructing a
+  *secondary* client-side dimension outside the normal login flow — approximated
+  with the current dimension's own `ClientLevel.getSeaLevel()`, consistent with
+  this same method's existing "good enough for a secondary world" approximations
+  for `biomeZoomSeed`/`isDebug`). Fixed in `ClientWorldLoader.createSecondaryClientWorld`.
+- **`Registry<T>.get(Identifier)` returning `Optional<Holder.Reference<T>>` instead
+  of `T`** (same finding as the `GlobalPortalStorage`/P1 rounds) swept to one more
+  call site — `.getValue(Identifier)` (direct, non-`Optional`) is the correct
+  replacement when a raw `T` is needed. Fixed in
+  `ClientWorldLoader.RemoteCallables.checkBiomeRegistry`.
+- **`LevelRenderer.renderSectionLayer(...)`/`RenderType.translucent()` both
+  confirmed gone** (the former already documented as part of the `FrameGraphBuilder`
+  rewrite; the latter has no replacement on either `RenderType` or the new
+  `RenderTypes` — only more specific factories like `glintTranslucent()`/
+  `linesTranslucent()` exist now). Removed the `@Redirect` hook targeting them with
+  a `TODO`, same precedent as the other already-removed `renderSectionLayer` hooks.
+  Fixed in `MixinLevelRenderer_Optional.java`.
+- **`SectionRenderDispatcher.setCamera(Vec3)` renamed to
+  `setCameraPosition(Vec3)`** (confirmed via `javap`, same shape). Fixed in
+  `MixinLevelRenderer_Optional.java`.
+- **`SectionRenderDispatcher.RenderSection.compiled` (an `AtomicReference<
+  SectionRenderDispatcher.CompiledSection>`) renamed/reshaped to `sectionMesh`
+  (an `AtomicReference<SectionMesh>`)** — `SectionMesh` is now an interface (was a
+  concrete class), and the `CompiledSection.UNCOMPILED` sentinel moved to a new
+  implementing class, `CompiledSectionMesh.UNCOMPILED` (both confirmed via
+  decompiled source). Fixed in `MixinLevelRenderer.java`.
+- **Reclassified as DimLib-blocked**: `ClientWorldLoader.java`'s remaining 1 error
+  (`DimensionAPI.CLIENT_DIMENSION_UPDATE_EVENT.register(...)`) — same root cause as
+  `EntitySync.java`/`ImmPtlChunkTickets.java`/`ImmPtlChunkTracking.java`, folded
+  into the "leave for absolute last" priority item.
+
+**Changelog — `RendererUsingStencil`/`ImmPtlViewArea`/`RenderTarget` round
+(113 → 95 errors, 40 → 33 symbols), all fixed, zero regressions:**
+
+- **`RenderSystem.depthMask(boolean)`/`.enableDepthTest()` removed** — vanilla's own
+  `GlStateManager._depthMask(boolean)`/`._enableDepthTest()` (already imported in
+  this file, matching the comment already present about preferring `GlStateManager`
+  for its internal state caching) are the direct replacements, confirmed via
+  `javap`. Fixed in `RendererUsingStencil.java` (4 call sites); removed the
+  now-unused `RenderSystem` import.
+- **`SectionRenderDispatcher.RenderSection`'s constructor reshaped**: no longer
+  `(int index, int x, int y, int z)` in raw block coordinates — now
+  `(int index, long sectionNode)`, a single packed section-coordinate value built
+  via `SectionPos.asLong(sectionX, sectionY, sectionZ)` (confirmed via decompiled
+  vanilla `ViewArea.createSections`, which calls exactly this). This mod's own
+  block-coordinate math (`sectionX << 4`, `(offsetCY << 4) + minY`, `sectionZ << 4`)
+  was replaced with the section-coordinate equivalent, reusing the `minSectionY`
+  field the constructor already computes elsewhere in the same class. Fixed in
+  `ImmPtlViewArea.createColumn`.
+- **`SectionRenderDispatcher.RenderSection.releaseBuffers()` renamed to `reset()`**
+  (confirmed via decompiled vanilla `ViewArea.releaseAllBuffers`, which calls
+  `section.reset()`). Fixed in `ImmPtlViewArea.java` (2 call sites, one a method
+  reference).
+- **`RenderTarget`'s constructor gained a leading `String label` param**
+  (`RenderTarget(String, boolean)`, confirmed via `javap`) — fixed the fake/
+  never-invoked pass-through constructors in `MixinMainTarget.java` (mirroring
+  `MainTarget`'s own real `super("Main", true)` call, confirmed via decompiled
+  source) and updated a matching `@Inject(method = "<init>")` handler in
+  `MixinRenderTarget.java` to accept the new leading `String` param too (this one
+  wasn't in the compile-error list — Mixin `@Inject`/`method=` targets aren't
+  validated by `compileJava` — but was fixed anyway since it's the exact same
+  ctor-shape change already being fixed in the same file, low-risk/high-value to
+  do together rather than leave a known-latent weave-time bug right next to the fix).
+- **`RenderTarget.resize(int, int, boolean)` dropped its trailing `boolean
+  clearError` param** — now just `resize(int, int)` (confirmed via `javap`). Fixed
+  the `@Shadow` declaration in `MixinRenderTarget.java` to match.
+
+**Changelog — `ClientboundSetTimePacket`/`WorldClock` redesign round (95 → 91
+errors, 33 → 31 symbols), both affected files fixed, zero regressions:**
+
+Full research via decompiled `net.minecraft.world.clock.ServerClockManager`/
+`WorldClock`/`ClockNetworkState` (previously deferred, not guessed at). Confirmed
+this is a genuine new global feature, not a per-dimension rename: the day/night
+clock system moved from being a single boolean+long pair owned by each `ServerLevel`
+to a server-wide registry of named `WorldClock`s (each just a `Holder`-referenced
+marker/tag, no data of its own), each with independent `ClockNetworkState(long
+totalTicks, float partialTick, float rate)` state tracked centrally by a new
+`ServerClockManager` (itself a `SavedData` singleton, not per-level). Vanilla now
+broadcasts clock updates to **every player regardless of which dimension they're
+in** (`ServerClockManager.modifyClock` calls `server.getPlayerList().broadcastAll(
+...)` unconditionally) — this may make part of `WorldInfoSender`'s original purpose
+(manually re-sending time to a player viewing a different dimension through a
+portal) redundant now, but this needs real-game verification to confirm rather than
+being assumed; left a `TODO` rather than removing the method.
+- `ClientboundSetTimePacket`'s constructor rebuilt around
+  `Map<Holder<WorldClock>, ClockNetworkState> clockUpdates` instead of a single
+  `dayTime`/`daylightCycle` pair. Best-effort translation in
+  `WorldInfoSender.sendWorldInfo`: build a single-entry map keyed by the target
+  dimension's own `DimensionType.defaultClock()` (an `Optional<Holder<WorldClock>>`
+  — empty for dimensions with no clock, e.g. Nether-like ones), with a
+  `ClockNetworkState` built from the world's own game time and the `ADVANCE_TIME`
+  game rule mapped to a `1.0`/`0.0` rate (closest equivalent to the old
+  daylight-cycle boolean).
+- `ClientLevel.setGameTime(long)` renamed to `setTimeFromServer(long)` (confirmed
+  via `javap` and vanilla's own `ClientPacketListener.handleSetTime`, which calls
+  `this.level.setTimeFromServer(gameTime)` for the currently-active level).
+  `ClientboundSetTimePacket.getGameTime()` renamed to the record accessor
+  `.gameTime()`. Since clocks are now global or (not per-`ClientLevel` fields), this
+  mod's cross-dimension time-mirroring loop only needed the `setTimeFromServer`
+  rename to keep every background `ClientLevel` in sync — no separate client-side
+  "clock manager" mirroring needed per secondary world, since that part of the new
+  system is already global/shared. Fixed in `MixinClientPacketListener.onSetTime`.
 
 ### 2. Portal rendering algorithm redesign (runtime work, needs a real game launch)
+
 
 
 Not a compile-error-driven item anymore — the whole cluster compiles clean (see

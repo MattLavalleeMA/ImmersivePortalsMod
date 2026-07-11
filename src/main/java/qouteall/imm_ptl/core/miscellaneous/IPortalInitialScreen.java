@@ -29,11 +29,8 @@ public class IPortalInitialScreen extends Screen {
     private int currentPageIndex = 0;
     
     public IPortalInitialScreen(Runnable onClose) {
-        super(Component.empty());
+        super(Minecraft.getInstance(), Minecraft.getInstance().font, Component.empty());
         this.onClose = onClose;
-        
-        this.minecraft = Minecraft.getInstance();
-        this.font = minecraft.font;
         
         prevButton = Button.builder(
             Component.translatable("iportal.initial_screen.prev"),

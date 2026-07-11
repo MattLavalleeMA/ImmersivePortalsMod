@@ -91,7 +91,7 @@ public class CHelper {
     }
     
     public static void printChat(Component text) {
-        Minecraft.getInstance().gui.getChat().addMessage(text);
+        Minecraft.getInstance().gui.getChat().addClientSystemMessage(text);
     }
     
     public static void openLinkConfirmScreen(

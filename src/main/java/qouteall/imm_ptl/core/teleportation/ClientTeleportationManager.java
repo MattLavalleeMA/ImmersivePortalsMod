@@ -371,7 +371,7 @@ public class ClientTeleportationManager {
         
         ScaleUtils.onClientPlayerTeleported(portal);
         
-        player.connection.send(ClientPlayNetworking.createC2SPacket(
+        player.connection.send(ClientPlayNetworking.createServerboundPacket(
             new ImmPtlNetworking.TeleportPacket(
                 PortalAPI.clientDimKeyToInt(fromDimension),
                 thisTickEyePos,
@@ -498,7 +498,11 @@ public class ClientTeleportationManager {
             ((IEParticleManager) client.particleEngine).ip_setWorld(toWorld);
         }
         
-        client.getBlockEntityRenderDispatcher().setLevel(toWorld);
+        // TODO MC 26.1: BlockEntityRenderDispatcher.setLevel(ClientLevel) removed entirely --
+        // the dispatcher no longer holds an externally-set level field at all (redesigned
+        // around the same CPU-extract/GPU-submit render-state split as EntityRenderer<T,S>,
+        // block entities carry their own level reference). Needs a real game launch to
+        // confirm block-entity rendering across a dimension switch still works without this.
         
         if (vehicle != null) {
             Vec3 offset = McHelper.getVehicleOffsetFromPassenger(vehicle, player);

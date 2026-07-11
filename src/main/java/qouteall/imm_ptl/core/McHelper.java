@@ -10,6 +10,9 @@ import com.mojang.serialization.DataResult;
 import com.mojang.serialization.DynamicOps;
 import com.mojang.serialization.JsonOps;
 import net.minecraft.util.Util;
+import net.minecraft.util.ProblemReporter;
+import net.minecraft.world.level.storage.TagValueInput;
+import net.minecraft.world.level.storage.TagValueOutput;
 import net.minecraft.client.Minecraft;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -20,6 +23,7 @@ import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
@@ -403,7 +407,13 @@ public class McHelper {
         
         Validate.notNull(newPortal);
         
-        newPortal.load(portal.saveWithoutId(new CompoundTag()));
+        TagValueOutput output = TagValueOutput.createWithContext(
+            ProblemReporter.DISCARDING, portal.level().registryAccess()
+        );
+        portal.saveWithoutId(output);
+        newPortal.load(TagValueInput.create(
+            ProblemReporter.DISCARDING, portal.level().registryAccess(), output.buildResult()
+        ));
         return newPortal;
     }
     
@@ -452,7 +462,7 @@ public class McHelper {
         getIEChunkMap(entity.level().dimension()).ip_resendSpawnPacketToTrackers(entity);
     }
     
-    public static void sendToTrackers(Entity entity, Packet<?> packet) {
+    public static void sendToTrackers(Entity entity, Packet<? super ClientGamePacketListener> packet) {
         ChunkMap.TrackedEntity entityTracker =
             getIEChunkMap(entity.level().dimension()).ip_getEntityTrackerMap().get(entity.getId());
         if (entityTracker == null) {
@@ -460,7 +470,7 @@ public class McHelper {
             return;
         }
         
-        entityTracker.broadcastAndSend(packet);
+        entityTracker.sendToTrackingPlayersAndSelf(packet);
     }
     
     //it's a little bit incorrect with corner glass pane

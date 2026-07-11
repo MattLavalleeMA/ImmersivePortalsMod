@@ -157,7 +157,7 @@ public class ImmPtlNetworkConfig {
         public void handle(
             ServerConfigurationNetworking.Context context
         ) {
-            ServerConfigurationPacketListenerImpl networkHandler = context.networkHandler();
+            ServerConfigurationPacketListenerImpl networkHandler = context.packetListener();
             
             GameProfile gameProfile =
                 ((IEServerConfigurationPacketListenerImpl) networkHandler).ip_getGameProfile();
@@ -204,11 +204,11 @@ public class ImmPtlNetworkConfig {
         
         LOGGER.info("Immersive Portals Core version {}", immPtlVersion);
         
-        PayloadTypeRegistry.configurationS2C().register(
+        PayloadTypeRegistry.clientboundConfiguration().register(
             S2CConfigStartPacket.TYPE, S2CConfigStartPacket.CODEC
         );
         
-        PayloadTypeRegistry.configurationC2S().register(
+        PayloadTypeRegistry.serverboundConfiguration().register(
             C2SConfigCompletePacket.TYPE, C2SConfigCompletePacket.CODEC
         );
         

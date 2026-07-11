@@ -1,7 +1,18 @@
 package qouteall.imm_ptl.core.mc_utils;
 
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.regex.Pattern;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
+
 import it.unimi.dsi.fastutil.bytes.ByteCollection;
 import it.unimi.dsi.fastutil.bytes.ByteOpenHashSet;
 import net.minecraft.ChatFormatting;
@@ -22,16 +33,7 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.nbt.TagVisitor;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import qouteall.imm_ptl.core.miscellaneous.IPVanillaCopy;
-
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
-import java.util.regex.Pattern;
 
 /**
  * copy to avoid mixin or access widener
@@ -114,13 +116,13 @@ public class MyNbtTextFormatter
     @Override
     public void visitFloat(FloatTag element) {
         MutableComponent text = Component.literal("f").withStyle(TYPE_SUFFIX_COLOR);
-        this.result = Component.literal(String.valueOf(element.getAsFloat())).append(text).withStyle(NUMBER_COLOR);
+        this.result = Component.literal(String.valueOf(element.floatValue())).append(text).withStyle(NUMBER_COLOR);
     }
     
     @Override
     public void visitDouble(DoubleTag element) {
         MutableComponent text = Component.literal("d").withStyle(TYPE_SUFFIX_COLOR);
-        this.result = Component.literal(String.valueOf(element.getAsDouble())).append(text).withStyle(NUMBER_COLOR);
+        this.result = Component.literal(String.valueOf(element.doubleValue())).append(text).withStyle(NUMBER_COLOR);
     }
     
     @Override

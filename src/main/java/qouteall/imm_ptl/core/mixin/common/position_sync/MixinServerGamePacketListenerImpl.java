@@ -10,6 +10,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.PositionMoveRotation;
 import net.minecraft.world.entity.Relative;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelReader;
@@ -212,14 +213,19 @@ public abstract class MixinServerGamePacketListenerImpl implements IEServerPlayN
         }
         
         this.awaitingTeleportTime = this.tickCount;
-        this.player.absMoveTo(x, y, z, yaw, pitch);
+        this.player.absSnapTo(x, y, z, yaw, pitch);
         ClientboundPlayerPositionPacket lookPacket = new ClientboundPlayerPositionPacket(
-            x - xBase, y - yBase, z - zBase,
-            yaw - yRotBase, pitch - xRotBase,
-            relativeAttrs, this.awaitingTeleport
+            this.awaitingTeleport,
+            new PositionMoveRotation(
+                new Vec3(x - xBase, y - yBase, z - zBase),
+                Vec3.ZERO,
+                yaw - yRotBase,
+                pitch - xRotBase
+            ),
+            relativeAttrs
         );
         
-        ((IEPlayerPositionLookS2CPacket) lookPacket).ip_setPlayerDimension(player.level().dimension());
+        ((IEPlayerPositionLookS2CPacket) (Object) lookPacket).ip_setPlayerDimension(player.level().dimension());
         
         this.player.connection.send(lookPacket);
     }

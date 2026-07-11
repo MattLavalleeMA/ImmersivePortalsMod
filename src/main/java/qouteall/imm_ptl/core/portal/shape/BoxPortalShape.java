@@ -1,5 +1,7 @@
 package qouteall.imm_ptl.core.portal.shape;
 
+import org.jetbrains.annotations.Nullable;
+
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.core.SectionPos;
@@ -8,7 +10,6 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import org.jetbrains.annotations.Nullable;
 import qouteall.imm_ptl.core.IPGlobal;
 import qouteall.imm_ptl.core.collision.CollisionHelper;
 import qouteall.imm_ptl.core.collision.PortalCollisionHandler;
@@ -40,7 +41,7 @@ public final class BoxPortalShape implements PortalShape {
     }
     
     private static BoxPortalShape deserialize(CompoundTag tag) {
-        boolean facingOutwards1 = tag.getBoolean("facingOutwards");
+        boolean facingOutwards1 = tag.getBooleanOr("facingOutwards", false);
         if (facingOutwards1) {
             return FACING_OUTWARDS;
         }

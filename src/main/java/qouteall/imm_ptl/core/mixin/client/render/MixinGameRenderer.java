@@ -12,6 +12,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.Lightmap;
+import net.minecraft.client.renderer.fog.FogRenderer;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
 import org.joml.Quaternionfc;
@@ -20,6 +21,7 @@ import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Mutable;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
@@ -51,7 +53,20 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     private Lightmap lightmap;
     
     @Shadow
-    private boolean renderHand;
+    @Final
+    private FogRenderer fogRenderer;
+    
+    // TODO MC 26.1: GameRenderer's own `renderHand` field was removed entirely (not
+    // just made inaccessible -- confirmed via javap that no such field exists anymore),
+    // so this can no longer be a @Shadow. Tracked independently here instead. Note this
+    // flag isn't actually wired into anything that skips rendering the hand yet --
+    // GameRenderer.renderItemInHand's signature also changed shape (now takes
+    // CameraRenderState/Matrix4fc instead of Camera/Matrix4f) which breaks this file's
+    // existing onRenderHandBegins/onRenderHandEnds @Inject hooks at Mixin weave time
+    // (not caught by compileJava, same caveat as MixinLevelRenderer's hooks) -- needs
+    // its own dedicated fix, tracked as part of the portal-rendering-algorithm item.
+    @Unique
+    private boolean renderHand = true;
     @Shadow
     @Final
     @Mutable
@@ -64,8 +79,10 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     @Shadow
     private boolean panoramicMode;
     
-    @Shadow
-    public abstract void resetProjectionMatrix(Matrix4f matrix4f);
+    // TODO MC 26.1: GameRenderer.resetProjectionMatrix(Matrix4f) was removed entirely
+    // (confirmed via javap) -- callers now use RenderSystem.backupProjectionMatrix()/
+    // .restoreProjectionMatrix() instead (see MyGameRenderer.java). Removed this dead
+    // @Shadow since nothing in this file used it and the target no longer exists.
     
     @Shadow
     protected abstract void bobView(PoseStack matrices, float f);
@@ -328,6 +345,16 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     @Override
     public boolean ip_getDoRenderHand() {
         return renderHand;
+    }
+    
+    @Override
+    public void ip_setDoRenderHand(boolean doRenderHand) {
+        renderHand = doRenderHand;
+    }
+    
+    @Override
+    public FogRenderer ip_getFogRenderer() {
+        return fogRenderer;
     }
     
     @Override

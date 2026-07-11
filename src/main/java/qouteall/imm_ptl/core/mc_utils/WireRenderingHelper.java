@@ -6,7 +6,6 @@ import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.NotNull;
@@ -30,6 +29,61 @@ import java.util.function.IntSupplier;
 
 @Environment(EnvType.CLIENT)
 public class WireRenderingHelper {
+    
+    /**
+     * TODO MC 26.1: {@code LevelRenderer.renderLineBox(...)} was removed entirely (not
+     * renamed) -- debug wireframe drawing appears to have moved to a new
+     * {@code net.minecraft.gizmos} package ({@code LineGizmo}), a genuinely new debug
+     * -drawing API not yet investigated. Reimplemented directly here instead, since this
+     * is simple, self-contained box-edge geometry (12 line segments) using the same
+     * plain {@link VertexConsumer} calls already used elsewhere in this file -- avoids
+     * depending on the unresearched Gizmo API for such a small amount of logic.
+     */
+    private static void renderLineBox(
+        PoseStack matrixStack, VertexConsumer vertexConsumer,
+        double x0, double y0, double z0, double x1, double y1, double z1,
+        float red, float green, float blue, float alpha
+    ) {
+        Matrix4f matrix = matrixStack.last().pose();
+        float fx0 = (float) x0, fy0 = (float) y0, fz0 = (float) z0;
+        float fx1 = (float) x1, fy1 = (float) y1, fz1 = (float) z1;
+        
+        // bottom face
+        addLine(vertexConsumer, matrix, fx0, fy0, fz0, fx1, fy0, fz0, red, green, blue, alpha);
+        addLine(vertexConsumer, matrix, fx1, fy0, fz0, fx1, fy0, fz1, red, green, blue, alpha);
+        addLine(vertexConsumer, matrix, fx1, fy0, fz1, fx0, fy0, fz1, red, green, blue, alpha);
+        addLine(vertexConsumer, matrix, fx0, fy0, fz1, fx0, fy0, fz0, red, green, blue, alpha);
+        
+        // top face
+        addLine(vertexConsumer, matrix, fx0, fy1, fz0, fx1, fy1, fz0, red, green, blue, alpha);
+        addLine(vertexConsumer, matrix, fx1, fy1, fz0, fx1, fy1, fz1, red, green, blue, alpha);
+        addLine(vertexConsumer, matrix, fx1, fy1, fz1, fx0, fy1, fz1, red, green, blue, alpha);
+        addLine(vertexConsumer, matrix, fx0, fy1, fz1, fx0, fy1, fz0, red, green, blue, alpha);
+        
+        // vertical edges
+        addLine(vertexConsumer, matrix, fx0, fy0, fz0, fx0, fy1, fz0, red, green, blue, alpha);
+        addLine(vertexConsumer, matrix, fx1, fy0, fz0, fx1, fy1, fz0, red, green, blue, alpha);
+        addLine(vertexConsumer, matrix, fx1, fy0, fz1, fx1, fy1, fz1, red, green, blue, alpha);
+        addLine(vertexConsumer, matrix, fx0, fy0, fz1, fx0, fy1, fz1, red, green, blue, alpha);
+    }
+    
+    private static void addLine(
+        VertexConsumer vertexConsumer, Matrix4f matrix,
+        float x0, float y0, float z0, float x1, float y1, float z1,
+        float red, float green, float blue, float alpha
+    ) {
+        float nx = x1 - x0;
+        float ny = y1 - y0;
+        float nz = z1 - z0;
+        float len = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+        if (len != 0) {
+            nx /= len;
+            ny /= len;
+            nz /= len;
+        }
+        vertexConsumer.addVertex(matrix, x0, y0, z0).setColor(red, green, blue, alpha).setNormal(nx, ny, nz);
+        vertexConsumer.addVertex(matrix, x1, y1, z1).setColor(red, green, blue, alpha).setNormal(nx, ny, nz);
+    }
     
     public static void renderSmallCubeFrame(
         VertexConsumer vertexConsumer, Vec3 cameraPos, Vec3 boxCenter,
@@ -61,7 +115,7 @@ public class WireRenderingHelper {
         float green = ((color >> 8) & 0xff) / 255f;
         float blue = (color & 0xff) / 255f;
         
-        LevelRenderer.renderLineBox(
+        renderLineBox(
             matrixStack,
             vertexConsumer,
             -boxSize / 2,

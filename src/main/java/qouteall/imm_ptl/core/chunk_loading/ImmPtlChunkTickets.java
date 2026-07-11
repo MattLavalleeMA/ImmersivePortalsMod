@@ -40,7 +40,7 @@ public class ImmPtlChunkTickets {
     
     public static final TicketType TICKET_TYPE = Registry.register(
         BuiltInRegistries.TICKET_TYPE,
-        Identifier.of("imm_ptl", "imm_ptl"),
+        Identifier.fromNamespaceAndPath("imm_ptl", "imm_ptl"),
         new TicketType(TicketType.NO_TIMEOUT, TicketType.FLAG_LOADING)
     );
     

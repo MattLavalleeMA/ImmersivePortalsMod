@@ -1,23 +1,25 @@
 package qouteall.imm_ptl.core.portal.global_portals;
 
-import com.google.common.base.Supplier;
-import com.google.common.collect.Streams;
-import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.level.ThreadedLevelLightEngine;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.chunk.ChunkAccess;
-import net.minecraft.world.phys.Vec3;
-import qouteall.imm_ptl.core.McHelper;
-import qouteall.q_misc_util.my_util.IntBox;
-
 import java.util.List;
 import java.util.WeakHashMap;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
+
+import com.google.common.base.Supplier;
+import com.google.common.collect.Streams;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ThreadedLevelLightEngine;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.phys.Vec3;
+import qouteall.imm_ptl.core.McHelper;
+import qouteall.q_misc_util.my_util.IntBox;
 
 public class BorderBarrierFiller {
     private static final WeakHashMap<ServerPlayer, Object> warnedPlayers
@@ -138,7 +140,7 @@ public class BorderBarrierFiller {
                 ChunkAccess chunk = world.getChunk(columnPos);
                 for (int y = minY; y < maxYEx; y++) {
                     temp1.set(columnPos.getX(), y, columnPos.getZ());
-                    chunk.setBlockState(temp1, Blocks.AIR.defaultBlockState(), false);
+                    chunk.setBlockState(temp1, Blocks.AIR.defaultBlockState(), Block.UPDATE_INVISIBLE);
                     lightingProvider.checkBlock(temp1);
                 }
                 

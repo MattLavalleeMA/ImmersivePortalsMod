@@ -2,7 +2,6 @@ package qouteall.imm_ptl.core.render;
 
 import net.minecraft.util.profiling.Profiler;
 
-import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.systems.RenderSystem;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import net.fabricmc.api.EnvType;
@@ -10,6 +9,7 @@ import net.fabricmc.api.Environment;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.fog.FogData;
 import net.minecraft.client.renderer.fog.FogRenderer;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.Lightmap;
@@ -19,7 +19,7 @@ import net.minecraft.client.renderer.SectionBufferBuilderPack;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
 import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.util.Mth;
+import net.minecraft.world.level.CardinalLighting;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -160,7 +160,12 @@ public class MyGameRenderer {
         
         // the projection matrix contains view bobbing.
         // the view bobbing is related with scale
-        Matrix4f oldProjectionMatrix = RenderSystem.getProjectionMatrix();
+        // TODO MC 26.1: RenderSystem.getProjectionMatrix()/GameRenderer.resetProjectionMatrix(Matrix4f)
+        // were both removed -- the projection matrix is now GPU-buffer-backed
+        // (RenderSystem.getProjectionMatrixBuffer()), not a plain CPU-side Matrix4f, so it
+        // can no longer be captured/restored by value. RenderSystem itself now provides a
+        // matching save/restore pair for exactly this purpose.
+        RenderSystem.backupProjectionMatrix();
         Matrix4fStack oldModelViewStack = IERenderSystem.ip_getModelViewStack();
         
         ObjectArrayList<SectionRenderDispatcher.RenderSection> newChunkInfoList =
@@ -174,9 +179,11 @@ public class MyGameRenderer {
         client.level = newWorld;
         ieGameRenderer.ip_setLightmapTextureManager(helper.lightmap);
         
-        client.getBlockEntityRenderDispatcher().level = newWorld;
+        // TODO MC 26.1: BlockEntityRenderDispatcher.level field was removed entirely with
+        // no replacement found (confirmed via javap) -- stubbed out, same as the identical
+        // situation in ClientTeleportationManager.changePlayerDimension.
         client.player.noPhysics = true;
-        client.gameRenderer.setRenderHand(doRenderHand);
+        ieGameRenderer.ip_setDoRenderHand(doRenderHand);
         
         FogRendererContext.swappingManager.pushSwapping(newDimension);
         ((IEParticleManager) client.particleEngine).ip_setWorld(newWorld);
@@ -218,7 +225,9 @@ public class MyGameRenderer {
         ((IEWorldRenderer) worldRenderer).portal_setTransparencyShader(null);
         
         IERenderSystem.ip_setModelViewStack(new Matrix4fStack(16));
-        RenderSystem.applyModelViewMatrix();
+        // TODO MC 26.1: RenderSystem.applyModelViewMatrix() was removed -- the model-view
+        // matrix is read live from RenderSystem.getModelViewStack() at draw time now,
+        // there's no separate "apply to shader state" step left to call anymore.
         
         IrisInterface.invoker.setPipeline(worldRenderer, null);
         
@@ -231,7 +240,7 @@ public class MyGameRenderer {
         invokeWrapper.accept(() -> {
             Profiler.get().push("render_portal_content");
             client.gameRenderer.renderLevel(
-                client.getTimer()
+                client.getDeltaTracker()
             );
             Profiler.get().pop();
         });
@@ -243,9 +252,9 @@ public class MyGameRenderer {
         ((IEMinecraftClient) client).ip_setWorldRenderer(oldWorldRenderer);
         client.level = oldWorld;
         ieGameRenderer.ip_setLightmapTextureManager(oldLightmap);
-        client.getBlockEntityRenderDispatcher().level = oldWorld;
+        // TODO MC 26.1: see BlockEntityRenderDispatcher.level TODO above.
         client.player.noPhysics = oldNoClip;
-        client.gameRenderer.setRenderHand(oldDoRenderHand);
+        ieGameRenderer.ip_setDoRenderHand(oldDoRenderHand);
         
         ((IEParticleManager) client.particleEngine).ip_setWorld(oldWorld);
         client.hitResult = oldCrosshairTarget;
@@ -268,15 +277,14 @@ public class MyGameRenderer {
         
         ((IEWorldRenderer) worldRenderer).portal_setFrustum(oldFrustum);
         
-        client.gameRenderer.resetProjectionMatrix(oldProjectionMatrix);
+        RenderSystem.restoreProjectionMatrix();
         IERenderSystem.ip_setModelViewStack(oldModelViewStack);
-        RenderSystem.applyModelViewMatrix();
+        // TODO MC 26.1: see RenderSystem.applyModelViewMatrix() TODO above -- no longer needed.
         
         IrisInterface.invoker.setPipeline(worldRenderer, irisPipeline);
         
         client.getEntityRenderDispatcher()
             .prepare(
-                client.level,
                 oldCamera,
                 client.crosshairPickEntity
             );
@@ -292,30 +300,31 @@ public class MyGameRenderer {
     @IPVanillaCopy
     public static void resetFogState() {
         Camera camera = client.gameRenderer.getMainCamera();
-        float g = client.gameRenderer.getRenderDistance();
+        float darkenWorldAmount = client.gameRenderer.getBossOverlayWorldDarkening(RenderStates.getPartialTick());
         
-        Vec3 cameraPos = camera.position();
-        double x = cameraPos.x();
-        double y = cameraPos.y();
-        double z = cameraPos.z();
-        
-        boolean isFoggy = client.level.effects().isFoggyAt(Mth.floor(x), Mth.floor(y)) ||
-            client.gui.getBossOverlay().shouldCreateWorldFog();
-        
-        FogRenderer.setupFog(
-            camera, FogRenderer.FogMode.FOG_TERRAIN, Math.max(g, 32.0F), isFoggy, RenderStates.getPartialTick()
+        // TODO MC 26.1: DimensionSpecialEffects (and its isFoggyAt()/the old boolean
+        // "isFoggy" param) was removed entirely -- FogRenderer.setupFog() now computes
+        // fogginess internally from the camera's current fluid/block context instead of
+        // taking it as an external input (confirmed via decompiled source), so there's
+        // nothing left for us to compute here at all.
+        FogRenderer fogRenderer = ((IEGameRenderer) client.gameRenderer).ip_getFogRenderer();
+        FogData fogData = fogRenderer.setupFog(
+            camera, client.options.getEffectiveRenderDistance(), client.getDeltaTracker(),
+            darkenWorldAmount, client.level
         );
-        FogRenderer.levelFogColor();
+        fogRenderer.updateBuffer(fogData);
     }
     
     public static void updateFogColor() {
-        FogRenderer.setupColor(
+        FogRenderer fogRenderer = ((IEGameRenderer) client.gameRenderer).ip_getFogRenderer();
+        FogData fogData = fogRenderer.setupFog(
             client.gameRenderer.getMainCamera(),
-            RenderStates.getPartialTick(),
-            client.level,
             client.options.getEffectiveRenderDistance(),
-            client.gameRenderer.getDarkenWorldAmount(RenderStates.getPartialTick())
+            client.getDeltaTracker(),
+            client.gameRenderer.getBossOverlayWorldDarkening(RenderStates.getPartialTick()),
+            client.level
         );
+        fogRenderer.updateBuffer(fogData);
     }
     
     /**
@@ -325,12 +334,13 @@ public class MyGameRenderer {
     public static void resetDiffuseLighting() {
         ClientLevel world = client.level;
         assert world != null;
-        if (world.effects().constantAmbientLight()) {
-            Lighting.setupNetherLevel();
-        }
-        else {
-            Lighting.setupLevel();
-        }
+        // TODO MC 26.1: DimensionSpecialEffects.constantAmbientLight() was removed --
+        // DimensionType now declares its cardinal lighting mode directly
+        // (DimensionType.cardinalLightType(), a CardinalLighting.Type enum: DEFAULT/NETHER),
+        // and Lighting itself became an instance (via GameRenderer.getLighting()) with a
+        // single updateLevel(CardinalLighting.Type) method instead of separate static
+        // setupLevel()/setupNetherLevel() methods.
+        client.gameRenderer.getLighting().updateLevel(world.dimensionType().cardinalLightType());
     }
     
     

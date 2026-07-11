@@ -1,6 +1,10 @@
 package qouteall.imm_ptl.core.portal.global_portals;
 
-import net.minecraft.world.entity.EntitySpawnReason;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -8,6 +12,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Tuple;
+import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
@@ -16,12 +21,6 @@ import qouteall.imm_ptl.core.McHelper;
 import qouteall.imm_ptl.core.portal.Portal;
 import qouteall.q_misc_util.Helper;
 import qouteall.q_misc_util.my_util.IntBox;
-
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 public class WorldWrappingPortal extends GlobalTrackedPortal {
     public static final EntityType<WorldWrappingPortal> ENTITY_TYPE =
@@ -39,10 +38,10 @@ public class WorldWrappingPortal extends GlobalTrackedPortal {
         super.readAdditionalSaveData(compoundTag);
         
         if (compoundTag.contains("isInward")) {
-            isInward = compoundTag.getBoolean("isInward");
+            isInward = compoundTag.getBooleanOr("isInward", isInward);
         }
         if (compoundTag.contains("zoneId")) {
-            zoneId = compoundTag.getInt("zoneId");
+            zoneId = compoundTag.getIntOr("zoneId", zoneId);
         }
     }
     

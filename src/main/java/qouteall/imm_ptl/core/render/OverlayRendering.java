@@ -1,10 +1,9 @@
 package qouteall.imm_ptl.core.render;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.VertexConsumer;
+
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.renderer.MultiBufferSource;
 import qouteall.imm_ptl.core.CHelper;
 import qouteall.imm_ptl.core.compat.iris_compatibility.IrisInterface;
 import qouteall.imm_ptl.core.portal.Portal;
@@ -28,8 +27,7 @@ public class OverlayRendering {
     
     public static void onRenderPortalEntity(
         Portal portal,
-        PoseStack matrixStack,
-        MultiBufferSource vertexConsumerProvider
+        PoseStack matrixStack
     ) {
         if (IrisInterface.invoker.isShaders()) {
             if (!shaderOverlayWarned) {
@@ -44,8 +42,7 @@ public class OverlayRendering {
             renderBreakablePortalOverlay(
                 ((BreakablePortalEntity) portal),
                 RenderStates.getPartialTick(),
-                matrixStack,
-                vertexConsumerProvider
+                matrixStack
             );
         }
     }
@@ -67,8 +64,7 @@ public class OverlayRendering {
     private static void renderBreakablePortalOverlay(
         BreakablePortalEntity portal,
         float partialTick,
-        PoseStack matrixStack,
-        MultiBufferSource vertexConsumerProvider
+        PoseStack matrixStack
     ) {
         // TODO MC 26.1: stubbed out, see comment above. Was: build BakedQuads from the
         // overlay's BlockState via BlockRenderDispatcher.getBlockModel() and feed them into

@@ -126,7 +126,7 @@ public class ImmPtlViewArea extends ViewArea {
     public void releaseAllBuffers() {
         Set<RenderSection> allActiveBuiltChunks = getAllActiveBuiltChunks();
         allActiveBuiltChunks.forEach(
-            RenderSection::releaseBuffers
+            RenderSection::reset
         );
         columnMap.clear();
         presets.clear();
@@ -254,12 +254,14 @@ public class ImmPtlViewArea extends ViewArea {
         int sectionX = ChunkPos.getX(sectionPos);
         int sectionZ = ChunkPos.getZ(sectionPos);
         
-        int minY = McHelper.getMinY(level);
-        
         for (int offsetCY = 0; offsetCY < sectionGridSizeY; offsetCY++) {
+            // TODO MC 26.1: RenderSection ctor now takes a packed SectionPos.asLong(...)
+            // section-coordinate node instead of raw block xyz (confirmed via decompiled
+            // ViewArea.createSections) -- minSectionY (already computed in the ctor above)
+            // is the section-coordinate equivalent of the old block-coordinate minY.
             RenderSection builtChunk = factory.new RenderSection(
                 0,
-                sectionX << 4, (offsetCY << 4) + minY, sectionZ << 4
+                SectionPos.asLong(sectionX, offsetCY + minSectionY, sectionZ)
             );
             
             array[offsetCY] = builtChunk;
@@ -340,7 +342,7 @@ public class ImmPtlViewArea extends ViewArea {
                 int num = 0;
                 while (!toDelete.isEmpty() && num < 100) {
                     RenderSection builtChunk = toDelete.poll();
-                    builtChunk.releaseBuffers();
+                    builtChunk.reset();
                     num++;
                 }
                 

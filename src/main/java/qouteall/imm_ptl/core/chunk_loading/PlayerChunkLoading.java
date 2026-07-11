@@ -5,6 +5,7 @@ import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import net.fabricmc.fabric.impl.attachment.AttachmentTargetImpl;
 import net.fabricmc.fabric.impl.attachment.sync.AttachmentChange;
+import net.fabricmc.fabric.impl.attachment.sync.AttachmentSync;
 import net.minecraft.network.protocol.game.ClientboundChunkBatchFinishedPacket;
 import net.minecraft.network.protocol.game.ClientboundChunkBatchStartPacket;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
@@ -222,7 +223,7 @@ public class PlayerChunkLoading {
         ((AttachmentTargetImpl) chunk).fabric_computeInitialSyncChanges(player, changes::add);
         
         if (!changes.isEmpty()) {
-            AttachmentChange.partitionAndSendPackets(changes, player);
+            AttachmentSync.trySync(changes, player);
         }
     }
     

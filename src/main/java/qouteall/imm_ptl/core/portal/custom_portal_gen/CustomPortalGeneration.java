@@ -1,36 +1,37 @@
 package qouteall.imm_ptl.core.portal.custom_portal_gen;
 
-import net.minecraft.util.profiling.Profiler;
-
-import com.google.common.collect.Lists;
-import com.mojang.serialization.Codec;
-import com.mojang.serialization.Lifecycle;
-import com.mojang.serialization.MapCodec;
-import com.mojang.serialization.codecs.RecordCodecBuilder;
-import net.minecraft.util.Util;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.MappedRegistry;
-import net.minecraft.core.Registry;
-import net.minecraft.core.registries.Registries;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.Identifier;
-import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.Level;
-import org.jetbrains.annotations.Nullable;
-import qouteall.imm_ptl.core.McHelper;
-import qouteall.imm_ptl.core.portal.Portal;
-import qouteall.imm_ptl.core.portal.custom_portal_gen.form.PortalGenForm;
-import qouteall.q_misc_util.Helper;
-import qouteall.q_misc_util.MiscHelper;
-
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import org.jetbrains.annotations.Nullable;
+
+import com.google.common.collect.Lists;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.Lifecycle;
+import com.mojang.serialization.MapCodec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.MappedRegistry;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.Util;
+import net.minecraft.util.profiling.Profiler;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.Level;
+import qouteall.imm_ptl.core.McHelper;
+import qouteall.imm_ptl.core.portal.Portal;
+import qouteall.imm_ptl.core.portal.custom_portal_gen.form.PortalGenForm;
+import qouteall.q_misc_util.Helper;
+import qouteall.q_misc_util.MiscHelper;
 
 public class CustomPortalGeneration {
     public static final ResourceKey<Level> THE_SAME_DIMENSION = ResourceKey.create(
@@ -202,7 +203,7 @@ public class CustomPortalGeneration {
         @Override
         public String toString() {
             return "No source dimension is loaded %s"
-                .formatted(srcDimIds.stream().map(ResourceKey::location).collect(Collectors.toList()));
+                .formatted(srcDimIds.stream().map(ResourceKey::identifier).collect(Collectors.toList()));
         }
     }
     

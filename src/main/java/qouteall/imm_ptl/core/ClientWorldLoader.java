@@ -121,7 +121,11 @@ public class ClientWorldLoader {
             });
             WORLD_RENDERER_MAP.values().forEach(worldRenderer -> {
                 if (worldRenderer != CLIENT.levelRenderer) {
-                    worldRenderer.tick();
+                    // TODO MC 26.1: LevelRenderer.tick() gained a required Camera param
+                    // (only used for spawning nearby weather particles) -- passing the
+                    // main camera as an approximation since there's no per-dimension
+                    // camera tracked for background (non-active) world renderers.
+                    worldRenderer.tick(CLIENT.gameRenderer.getMainCamera());
                 }
             });
             isClientRemoteTicking = false;
@@ -408,7 +412,13 @@ public class ClientWorldLoader {
             CLIENT,
             CLIENT.getEntityRenderDispatcher(),
             CLIENT.getBlockEntityRenderDispatcher(),
-            CLIENT.renderBuffers()
+            CLIENT.renderBuffers(),
+            // TODO MC 26.1: LevelRenderer gained 2 new ctor params, GameRenderState and
+            // FeatureRenderDispatcher, both of which are per-GameRenderer singletons (not
+            // per-LevelRenderer) -- reused from the single client GameRenderer instance,
+            // same as EntityRenderDispatcher/BlockEntityRenderDispatcher already are above.
+            CLIENT.gameRenderer.getGameRenderState(),
+            CLIENT.gameRenderer.getFeatureRenderDispatcher()
         );
         
         ClientLevel newWorld;
@@ -436,7 +446,7 @@ public class ClientWorldLoader {
             
             Holder<DimensionType> dimensionType = registryManager
                 .lookupOrThrow(Registries.DIMENSION_TYPE)
-                .getHolderOrThrow(dimensionTypeKey);
+                .getOrThrow(dimensionTypeKey);
             
             // currently use a separated level data object
             // day time is not shared between worlds
@@ -452,10 +462,14 @@ public class ClientWorldLoader {
                 dimensionType,
                 chunkLoadDistance,
                 simulationDistance,// seems that client world does not use this
-                Profiler::get,
                 worldRenderer,
                 CLIENT.level.isDebug(),
-                CLIENT.level.getBiomeManager().biomeZoomSeed
+                CLIENT.level.getBiomeManager().biomeZoomSeed,
+                // TODO MC 26.1: ClientLevel ctor gained a trailing seaLevel param (no
+                // per-dimension source available here -- approximated with the current
+                // dimension's own sea level, same "good enough for a secondary world"
+                // approach already used for biomeZoomSeed/isDebug above).
+                CLIENT.level.getSeaLevel()
             );
             
             // all worlds share the same map data map
@@ -622,7 +636,7 @@ public class ClientWorldLoader {
                 Identifier id = McHelper.newResourceLocation(entry.getKey());
                 int expectedId = entry.getValue();
                 
-                if (biomes.getId(biomes.get(id)) != expectedId) {
+                if (biomes.getId(biomes.getValue(id)) != expectedId) {
                     LOGGER.error("Biome id mismatch: {} {}", id, expectedId);
                 }
             }

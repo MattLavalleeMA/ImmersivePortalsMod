@@ -3,7 +3,6 @@ package qouteall.imm_ptl.core.mixin.client.render;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.LevelRenderer;
-import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.ViewArea;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
 import net.minecraft.world.phys.Vec3;
@@ -32,21 +31,12 @@ public class MixinLevelRenderer_Optional {
     private Minecraft minecraft;
     
     //avoid translucent sort while rendering portal
-    @Redirect(
-        method = "renderSectionLayer",
-        at = @At(
-            value = "INVOKE",
-            target = "Lnet/minecraft/client/renderer/RenderType;translucent()Lnet/minecraft/client/renderer/RenderType;",
-            ordinal = 0
-        ),
-        require = 0
-    )
-    private RenderType redirectGetTranslucent() {
-        if (PortalRendering.isRendering()) {
-            return null;
-        }
-        return RenderType.translucent();
-    }
+    // TODO MC 26.1: LevelRenderer.renderSectionLayer(...) no longer exists in this form
+    // (part of the FrameGraphBuilder rewrite already documented for MixinLevelRenderer.java)
+    // and RenderType.translucent()/RenderTypes.translucent() doesn't exist either (RenderTypes
+    // only has more specific translucent-ish factories like glintTranslucent()/
+    // linesTranslucent() now) -- removed rather than guessed at, same precedent as the
+    // other already-removed renderSectionLayer-targeting hooks.
     
     //the camera position is used for translucent sort
     //avoid messing it
@@ -54,7 +44,7 @@ public class MixinLevelRenderer_Optional {
         method = "Lnet/minecraft/client/renderer/LevelRenderer;setupRender(Lnet/minecraft/client/Camera;Lnet/minecraft/client/renderer/culling/Frustum;ZZ)V",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/client/renderer/chunk/SectionRenderDispatcher;setCamera(Lnet/minecraft/world/phys/Vec3;)V"
+            target = "Lnet/minecraft/client/renderer/chunk/SectionRenderDispatcher;setCameraPosition(Lnet/minecraft/world/phys/Vec3;)V"
         ),
         require = 0
     )
@@ -66,7 +56,7 @@ public class MixinLevelRenderer_Optional {
                 return;
             }
         }
-        chunkBuilder.setCamera(cameraPosition);
+        chunkBuilder.setCameraPosition(cameraPosition);
     }
     
     // TODO MC 26.1: old anchor ShaderInstance.apply() no longer exists (ShaderInstance

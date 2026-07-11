@@ -35,10 +35,11 @@ public abstract class MixinRenderTarget implements IEFrameBuffer {
     
     
     @Shadow
-    public abstract void resize(int width, int height, boolean clearError);
+    public abstract void resize(int width, int height);
     
     @Inject(method = "<init>", at = @At("RETURN"))
     private void onInit(
+        String label,
         boolean useDepth,
         CallbackInfo ci
     ) {
