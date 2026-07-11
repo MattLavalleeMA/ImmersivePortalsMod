@@ -1129,20 +1129,12 @@ the last mechanical batch (not compile errors, so not in the count above):**
   real in-game testing across dimensions to see whether the new pipeline still
   has the original problem at all.
 
-**Priority order for remaining work:**
+**Priority order for remaining work** (genuinely open items only —
+`MixinGameRenderer.java`'s weave-time fix that used to be listed first here is
+DONE and has been moved to the changelog; see the "Newly-discovered" bullets
+above for its writeup):
 
-1. **`MixinGameRenderer.java` weave-time-only breakage — fixed.**
-   `GameRenderer.renderItemInHand` changed signature shape (`CameraRenderState`/
-   `Matrix4fc` instead of `Camera`/`Matrix4f`, confirmed via javap), which broke
-   this file's `onRenderHandBegins`/`onRenderHandEnds` `@Inject` hooks (which
-   track a `portal_isRenderingHand` flag used by the `bobView` translate
-   modifiers) at Mixin weave time (not caught by `compileJava`). Updated both
-   hooks' parameter lists to match the real new signature
-   (`CameraRenderState, float, Matrix4fc, CallbackInfo`) — the hook bodies
-   themselves needed no changes since they only set/clear the flag, never touch
-   the parameters. Rebuilt and confirmed error count unchanged (61) — no
-   regressions.
-2. **`net.minecraft.gizmos` debug-drawing system (newly discovered, not yet
+1. **`net.minecraft.gizmos` debug-drawing system (newly discovered, not yet
    investigated)**: vanilla's old `LevelRenderer.renderLineBox(...)` convenience
    helper was removed outright (not renamed) — a `LineGizmo` class exists in a
    brand-new `net.minecraft.gizmos` package that appears to be vanilla's own
@@ -1151,14 +1143,14 @@ the last mechanical batch (not compile errors, so not in the count above):**
    vanilla debug-drawing helpers turn out to be missing elsewhere, the real Gizmo
    API should be investigated properly instead of continuing to hand-roll
    replacements one at a time.
-3. **`MixinFogRenderer.java` weave-time-only breakage (not a compile error;
+2. **`MixinFogRenderer.java` weave-time-only breakage (not a compile error;
    `MixinCamera.java`'s equivalent issue was fixed this round — see the
    "Newly-discovered" bullets above)**: `MixinFogRenderer.java`'s cross-dimension
    fog color swap needs a real redesign against the new instance/GPU-buffer
    `FogRenderer` (`RendererUsingStencil.java`'s `getCurrentFogColor` use is the
    one remaining caller depending on it) — needs real in-game testing to get
    right, not a guess.
-4. **Leave for absolute last (confirmed external/blocked, not in-repo fixable)**:
+3. **Leave for absolute last (confirmed external/blocked, not in-repo fixable)**:
    `GravityChangerInterface.java` (22 errors, archived/dead upstream dependency,
    disabled by default) and `AlternateDimensions.java`/`EntitySync.java`/
    `ImmPtlChunkTickets.java`/`ImmPtlChunkTracking.java`/`ClientWorldLoader.java`/
@@ -1171,11 +1163,12 @@ the last mechanical batch (not compile errors, so not in the count above):**
    `ServerLevel`-typed handler methods. Grep for `qouteall.dimlib` imports to find
    more of these proactively rather than waiting for them to surface one at a time.
 
-**With this round, every genuinely mechanical/in-repo-fixable compile-error cluster
-is done.** The only compile errors left (61) are confirmed-external/DimLib-blocked
-(items above). The still-stubbed portal-rendering-pipeline pieces tracked under
-item 2 below (runtime work, not compile-error-driven anymore per its own section)
-and the newly-found weave-time-only issues (item 3 above) are separate from the
+**Every genuinely mechanical/in-repo-fixable compile-error cluster is done.** The
+only compile errors left (61) are confirmed-external/DimLib-blocked (item 3 in
+the priority list above). The still-stubbed portal-rendering-pipeline pieces
+tracked under "2. Portal rendering algorithm redesign" below (runtime work, not
+compile-error-driven anymore per its own section) and the newly-found
+weave-time-only issues (item 2 in the priority list above) are separate from the
 compile-error count entirely. Re-run `parse_compile_errors.py --run` to confirm
 before starting a new session.
 
