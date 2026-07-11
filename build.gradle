@@ -80,6 +80,12 @@ dependencies {
     compileOnly "maven.modrinth:modmenu:${modmenu_version}"
     localRuntime "maven.modrinth:modmenu:${modmenu_version}"
 
+    // Used by the DimLib module (qouteall.dimlib, merged into this repo's own
+    // source tree — see src/main/java/qouteall/dimlib — since upstream DimLib
+    // (iPortalTeam/DimLib) is archived and has no 26.1-compatible release).
+    implementation "maven.modrinth:midnightlib:${midnightlib_version}"
+    include "maven.modrinth:midnightlib:${midnightlib_version}"
+
     compileOnly "${project.sodium_path}"
 
     compileOnly "${project.iris_path}"
@@ -88,14 +94,6 @@ dependencies {
         exclude(group: "net.fabricmc.fabric-api")
         transitive = false
     }
-
-    // TODO BLOCKING: DimLib has no 26.1-compatible release yet (last release targets
-    // 1.21.1). This dependency is unconditional, so the project cannot build for
-    // 26.1 until DimLib itself is migrated to the non-obfuscated toolchain.
-    api("com.github.iPortalTeam:DimLib:${dimlib_version}") {
-        exclude(group: "net.fabricmc.fabric-api")
-    }
-    include("com.github.iPortalTeam:DimLib:${dimlib_version}")
 
     // put these into inner mod to reduce duplicate MC jar
 

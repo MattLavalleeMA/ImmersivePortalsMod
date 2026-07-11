@@ -210,7 +210,7 @@ public class AlternateDimensions {
     public static ChunkGenerator createVoidGenerator(RegistryAccess rm) {
         Registry<Biome> biomeRegistry = rm.lookupOrThrow(Registries.BIOME);
         
-        Holder.Reference<Biome> plainsHolder = biomeRegistry.getHolderOrThrow(Biomes.PLAINS);
+        Holder.Reference<Biome> plainsHolder = biomeRegistry.getOrThrow(Biomes.PLAINS);
         
         FlatLevelGeneratorSettings flatChunkGeneratorConfig =
             new FlatLevelGeneratorSettings(
