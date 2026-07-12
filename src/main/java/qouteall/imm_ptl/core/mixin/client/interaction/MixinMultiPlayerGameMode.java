@@ -38,8 +38,12 @@ public abstract class MixinMultiPlayerGameMode implements IEClientPlayerInteract
     private Minecraft minecraft;
     
     // the player level field is not being switched now
+    // MC 26.1: stale intermediary lambda name method_41930 no longer exists
+    // (unobfuscated build, real names only). startDestroyBlock has two lambdas
+    // (lambda$startDestroyBlock$0/$1); only $1 (the survival-mode destroy-progress
+    // branch) actually calls player.level(), confirmed via decompile.
     @Redirect(
-        method = "method_41930", // lambda in startDestroyBlock
+        method = "lambda$startDestroyBlock$1",
         at = @At(
             value = "INVOKE",
             target = "Lnet/minecraft/client/player/LocalPlayer;level()Lnet/minecraft/world/level/Level;"

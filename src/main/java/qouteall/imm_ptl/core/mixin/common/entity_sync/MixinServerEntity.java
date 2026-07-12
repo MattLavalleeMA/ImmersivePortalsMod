@@ -75,19 +75,15 @@ public abstract class MixinServerEntity implements IEEntityTrackerEntry {
         PacketRedirection.sendRedirectedPacket(networkHandler, packet, entity.level().dimension());
     }
     
-    @Redirect(
-        method = "Lnet/minecraft/server/level/ServerEntity;broadcastAndSend(Lnet/minecraft/network/protocol/Packet;)V",
-        at = @At(
-            value = "INVOKE",
-            target = "Lnet/minecraft/server/network/ServerGamePacketListenerImpl;send(Lnet/minecraft/network/protocol/Packet;)V"
-        )
-    )
-    private void onSendToWatcherAndSelf(
-        ServerGamePacketListenerImpl serverPlayNetworkHandler,
-        Packet packet
-    ) {
-        PacketRedirection.sendRedirectedPacket(serverPlayNetworkHandler, packet, entity.level().dimension());
-    }
+    // MC 26.1: ServerEntity no longer has its own broadcast/broadcastAndSend wrapper
+    // methods -- it now calls this.synchronizer.sendToTrackingPlayers(...)/
+    // .sendToTrackingPlayersAndSelf(...) directly (synchronizer is the
+    // ChunkMap.TrackedEntity instance). The self-inclusive-send redirect this used to
+    // provide is already covered by MixinTrackedEntity's onSendToNearbyPlayers, which
+    // redirects the equivalent ServerGamePacketListenerImpl.send call inside
+    // ChunkMap.TrackedEntity.sendToTrackingPlayersAndSelf -- removed as dead/redundant
+    // code (confirmed via decompile: ServerEntity itself no longer calls
+    // ServerGamePacketListenerImpl.send anywhere).
     
     /**
      * It encodes position into 1/4096 units. That precision is not enough for portals.

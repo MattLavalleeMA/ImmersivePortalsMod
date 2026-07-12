@@ -177,11 +177,18 @@ public abstract class MixinServerGamePacketListenerImpl implements IEServerPlayN
      * @reason make PlayerPositionLookS2CPacket contain dimension data and do some special handling
      * @author qouteall
      */
+    // MC 26.1: the old 6-param teleport(double,double,double,float,float,Set<Relative>)
+    // was split into teleport(double,double,double,float,float) (no relatives, delegates
+    // to the other overload with Relative.NONE) and teleport(PositionMoveRotation,
+    // Set<Relative>) (the real work, now using Entity.teleportSetPosition(...) and
+    // ClientboundPlayerPositionPacket.of(...) instead of manually computing delta values
+    // and calling absSnapTo) -- confirmed via decompile. Retargeted the @Overwrite to the
+    // new PositionMoveRotation-based overload, preserving the same custom dimension-aware
+    // packet handling.
     @Overwrite
     @IPVanillaCopy
     public void teleport(
-        double x, double y, double z, float yaw, float pitch,
-        Set<Relative> relativeAttrs
+        PositionMoveRotation destination, Set<Relative> relativeAttrs
     ) {
         // it may request teleport while this.player is marked removed during respawn
         
@@ -193,36 +200,26 @@ public abstract class MixinServerGamePacketListenerImpl implements IEServerPlayN
             return;
         }
         
+        Vec3 pos = destination.position();
+        
         if (IPConfig.getConfig().serverTeleportLogging) {
             LOGGER.info(
                 "Teleporting player {} to {} {} {} {}",
-                player, player.level().dimension().identifier(), x, y, z
+                player, player.level().dimension().identifier(), pos.x, pos.y, pos.z
             );
         }
         
-        double xBase = relativeAttrs.contains(Relative.X) ? this.player.getX() : 0.0;
-        double yBase = relativeAttrs.contains(Relative.Y) ? this.player.getY() : 0.0;
-        double zBase = relativeAttrs.contains(Relative.Z) ? this.player.getZ() : 0.0;
-        float yRotBase = relativeAttrs.contains(Relative.Y_ROT) ? this.player.getYRot() : 0.0f;
-        float xRotBase = relativeAttrs.contains(Relative.X_ROT) ? this.player.getXRot() : 0.0f;
-        
-        this.awaitingPositionFromClient = new Vec3(x, y, z);
-        this.ip_dimOfAwaitingPosition = player.level().dimension();
+        this.awaitingTeleportTime = this.tickCount;
         if (++this.awaitingTeleport == Integer.MAX_VALUE) {
             this.awaitingTeleport = 0;
         }
         
-        this.awaitingTeleportTime = this.tickCount;
-        this.player.absSnapTo(x, y, z, yaw, pitch);
-        ClientboundPlayerPositionPacket lookPacket = new ClientboundPlayerPositionPacket(
-            this.awaitingTeleport,
-            new PositionMoveRotation(
-                new Vec3(x - xBase, y - yBase, z - zBase),
-                Vec3.ZERO,
-                yaw - yRotBase,
-                pitch - xRotBase
-            ),
-            relativeAttrs
+        this.player.teleportSetPosition(destination, relativeAttrs);
+        this.awaitingPositionFromClient = this.player.position();
+        this.ip_dimOfAwaitingPosition = player.level().dimension();
+        
+        ClientboundPlayerPositionPacket lookPacket = ClientboundPlayerPositionPacket.of(
+            this.awaitingTeleport, destination, relativeAttrs
         );
         
         ((IEPlayerPositionLookS2CPacket) (Object) lookPacket).ip_setPlayerDimension(player.level().dimension());
@@ -230,12 +227,22 @@ public abstract class MixinServerGamePacketListenerImpl implements IEServerPlayN
         this.player.connection.send(lookPacket);
     }
     
+    // MC 26.1: isPlayerCollidingWithAnythingNew(LevelReader, AABB, double, double,
+    // double) was generalized into isEntityCollidingWithAnythingNew(LevelReader,
+    // Entity, AABB, double, double, double) -- now also used for vehicle collision
+    // checks (confirmed via decompile), not just the player. Guard on entity ==
+    // this.player so the cross-portal-collision override only applies to the actual
+    // player check, letting vanilla handle the vehicle case untouched.
     @Inject(
-        method = "isPlayerCollidingWithAnythingNew", at = @At("HEAD"), cancellable = true
+        method = "isEntityCollidingWithAnythingNew", at = @At("HEAD"), cancellable = true
     )
     private void onIsPlayerCollidingWithAnythingNew(
-        LevelReader level, AABB playerBB, double newX, double newY, double newZ, CallbackInfoReturnable<Boolean> cir
+        LevelReader level, Entity entity, AABB playerBB, double newX, double newY, double newZ, CallbackInfoReturnable<Boolean> cir
     ) {
+        if (entity != this.player) {
+            return;
+        }
+        
         if (!IPGlobal.crossPortalCollision) {
             return;
         }

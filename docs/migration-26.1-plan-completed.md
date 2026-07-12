@@ -2276,5 +2276,122 @@ they're discovered through manual play-testing — see
 [migration-26.1-plan.md](migration-26.1-plan.md)'s "Next steps" for current
 handoff state.
 
+## `./gradlew runClient` weave-time crash-fixing pass, round 3 — player-join/world-creation workflow (fixes applied, not yet launch-verified)
+
+Continuation of rounds 1-2 above, same workflow (recompile → `runClient` → read
+crash → fix → repeat). Round 2 got a clean main-menu launch; this round started
+clicking further — opening Create World's dim_stack "More" tab, then actually
+creating and loading a world — and found the next layer of deferred crashes.
+**Unlike rounds 1-2, the last fix in this round (`isEntityCollidingWithAnythingNew`,
+see below) was made after the most recent `runClient` log was captured — it has
+not yet been launch-verified.** Treat this whole round as "compiles clean,
+believed correct, needs a fresh launch to confirm" rather than "done".
+
+Fixes applied, in order:
+
+- `MixinServerPlayerGameMode.java`: two fixes. (1) `redirectGetLevel`'s `@Redirect`
+  targeted `ServerPlayer.level()Lnet/minecraft/world/level/Level;` — since the
+  `player` field here is statically typed `ServerPlayer` (which covariantly
+  overrides `Entity.level()` to return `ServerLevel`), javac now emits the real
+  `()Lnet/minecraft/server/level/ServerLevel;` invokevirtual at the call site, not
+  the synthetic `Level`-returning bridge method (confirmed via `javap`: both the
+  real `ServerLevel`-returning override and a synthetic `Level`-returning bridge
+  exist on the class). Retargeted the `@At` descriptor and the handler's return
+  type to `ServerLevel`. (2) `Player.canInteractWithBlock(BlockPos, double)` was
+  renamed to `isWithinBlockInteractionRange(BlockPos, double)` (same signature) —
+  fixed the `@WrapOperation` target in `wrapDistanceInHandleBlockBreakAction`.
+- `src/main/resources/data/immersive_portals/dimension_type/surface_type.json` +
+  `surface_type_bright.json`: world creation hung at "Preparing for world
+  creation..." with no Mixin-apply error at all — the actual cause was a data-pack
+  loading failure. MC 26.1's `DimensionType` codec (confirmed by decompiling
+  `net/minecraft/world/level/dimension/DimensionType.java` from the sources jar and
+  reading its `RecordCodecBuilder`) added a new **required** field
+  `has_ender_dragon_fight` with no default; both of this mod's custom dimension
+  types were missing it. Added `"has_ender_dragon_fight": false` to both files
+  (the pre-existing `piglin_safe`/`bed_works`/`respawn_anchor_works`/`has_raids`
+  top-level keys are stale — MC 26.1 moved those into a nested `attributes` map —
+  but `Codec` silently ignores unknown keys, so they're harmless leftovers, not
+  bugs; only the missing required field needed fixing).
+- `MixinCreateWorldScreenMoreTab_CVB.java`: the shadowed implicit outer-class
+  reference field had a stale intermediary name, `field_42178` — MC 26.1 ships
+  unobfuscated, so the real field is the compiler-synthesized `this$0`. Renamed
+  the `@Shadow` field and its one usage.
+- `MixinMultiPlayerGameMode.java`: same stale-intermediary-lambda-name issue as
+  several round-1/2 fixes — `method_41930` (a lambda inside `startDestroyBlock`)
+  no longer exists under any name in the unobfuscated build. `startDestroyBlock`
+  actually has two lambdas (`lambda$startDestroyBlock$0`/`$1`); confirmed via
+  decompile that only `$1` (the survival-mode destroy-progress branch) calls
+  `player.level()` — retargeted to `lambda$startDestroyBlock$1`.
+- `MixinChunkMap_C.java`: `onChunkReadyToSend`'s `@Overwrite` target gained a
+  leading `ChunkHolder` param (was just `(LevelChunk)`, now
+  `(ChunkHolder, LevelChunk)`) — confirmed via `javap`/decompile. The
+  `@Overwrite` still fully replaces vanilla's behavior (no
+  `markChunkPendingToSend`/registration calls), matching the pre-existing design;
+  only the signature needed updating.
+- `DimStackGuiController.java`: every mutator (`insertEntry`/`insertEntries`/
+  `removeEntry`/`clear`/`setEntry`/`swapListElement`, the dim_stack "More" tab's
+  backing GUI controller) directly mutated `view.dimListWidget.children()`
+  (`.add`/`.remove`/`.set`/`.clear`). MC 26.1's `AbstractSelectionList.children()`
+  now returns an **unmodifiable** view (confirmed: these calls threw
+  `UnsupportedOperationException`) — the only supported mutator left is the
+  still-public `replaceEntries(Collection)`. Added a new private
+  `syncWidgetsFromModel()` helper that rebuilds the entire widget list from
+  `model.dimStackInfo.entries` and calls `replaceEntries(...)`, and switched every
+  mutator to call it instead of touching `children()` directly.
+- `IEChunkMap_Accessor.java` + `PortalDebugCommands.java` call site:
+  `ChunkMap.getChunks(): Iterable<ChunkHolder>` (previously exposed via
+  `@Invoker`) was removed with no replacement method — confirmed via `javap`, the
+  backing data is now just the private `visibleChunkMap` field
+  (`Long2ObjectLinkedOpenHashMap<ChunkHolder>`). Replaced the `@Invoker` with
+  `@Accessor("visibleChunkMap")` returning the map directly, and updated
+  `PortalDebugCommands`'s one call site to `.ip_getVisibleChunkMap().values()`.
+- `MixinTrackedEntity.java`: `ChunkMap.TrackedEntity.broadcast(Packet)` and
+  `.broadcastAndSend(Packet)` were renamed to `sendToTrackingPlayers(Packet)` and
+  `sendToTrackingPlayersAndSelf(Packet)` respectively (same internal logic,
+  confirmed via decompile) — retargeted both `@Redirect` `method` descriptor
+  strings.
+- `MixinServerGamePacketListenerImpl.java`: two fixes in this file.
+  (1) `teleport(double,double,double,float,float,Set<Relative>)` was split into a
+  no-relatives `teleport(double,double,double,float,float)` overload (delegates
+  to the other one with `Relative.NONE`) and the real
+  `teleport(PositionMoveRotation,Set<Relative>)` overload, which now internally
+  uses `Entity.teleportSetPosition(...)` and
+  `ClientboundPlayerPositionPacket.of(...)` instead of manually computing
+  relative-delta values and calling `absSnapTo` (confirmed via decompile).
+  Retargeted the `@Overwrite` to the new `PositionMoveRotation`-based overload,
+  preserving the same custom cross-dimension packet handling.
+  (2) `isPlayerCollidingWithAnythingNew(LevelReader, AABB, double, double,
+  double)` was generalized into `isEntityCollidingWithAnythingNew(LevelReader,
+  Entity, AABB, double, double, double)` — now also used for vehicle-collision
+  checks, not just the player (confirmed via decompile). Retargeted the `@Inject`
+  to the new name/signature and added an `entity == this.player` guard so the
+  cross-portal-collision override only fires for the actual player check,
+  leaving vanilla's vehicle-collision path untouched. **This was the last edit
+  made in this round — made after the most recent captured `runClient` log, so
+  it is unverified at runtime** (0 compile errors confirmed via
+  `parse_compile_errors.py --run`, but no fresh launch has been attempted since).
+- `MixinServerEntity.java`: removed a now-dead `@Redirect` named
+  `onSendToWatcherAndSelf` targeting
+  `ServerEntity.broadcastAndSend(Packet)` → `ServerGamePacketListenerImpl.send`.
+  Confirmed via decompile that `ServerEntity` no longer has its own
+  broadcast/broadcastAndSend wrapper methods at all — it now calls
+  `this.synchronizer.sendToTrackingPlayers(...)`/`.sendToTrackingPlayersAndSelf(...)`
+  directly (`synchronizer` being the `ChunkMap.TrackedEntity` instance), and the
+  self-inclusive-send behavior this redirect used to provide is already covered
+  by `MixinTrackedEntity`'s equivalent redirect on
+  `ChunkMap.TrackedEntity.sendToTrackingPlayersAndSelf` (see above) — this one
+  was genuinely dead/redundant code, not a rename.
+
+**Status: fixes applied, 0 compile errors (verified via `parse_compile_errors.py
+--run`), but NOT YET launch-tested as a whole.** The last captured `runClient`
+crash log (before the `isEntityCollidingWithAnythingNew` fix above) showed world
+creation reaching the "Saving World"/player-spawn stage and then failing weave-time
+on the stale `isPlayerCollidingWithAnythingNew` target; that fix — and the
+`MixinServerEntity` cleanup after it — have not yet been exercised by an actual
+launch. **Next action: re-run `./gradlew runClient`, retry creating/joining a
+world, and confirm whether it now succeeds** — see
+[migration-26.1-plan.md](migration-26.1-plan.md)'s "Next steps" for full handoff
+detail.
+
 
 

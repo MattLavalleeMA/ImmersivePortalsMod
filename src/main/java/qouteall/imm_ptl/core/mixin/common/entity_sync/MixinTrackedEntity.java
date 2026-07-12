@@ -58,8 +58,11 @@ public abstract class MixinTrackedEntity implements IETrackedEntity {
     @Shadow
     private SectionPos lastSectionPos;
     
+    // MC 26.1: ChunkMap.TrackedEntity.broadcast(Packet) renamed to
+    // sendToTrackingPlayers(Packet) (still calls ServerPlayerConnection.send
+    // internally, confirmed via decompile).
     @Redirect(
-        method = "Lnet/minecraft/server/level/ChunkMap$TrackedEntity;broadcast(Lnet/minecraft/network/protocol/Packet;)V",
+        method = "Lnet/minecraft/server/level/ChunkMap$TrackedEntity;sendToTrackingPlayers(Lnet/minecraft/network/protocol/Packet;)V",
         at = @At(
             value = "INVOKE",
             target = "Lnet/minecraft/server/network/ServerPlayerConnection;send(Lnet/minecraft/network/protocol/Packet;)V"
@@ -76,9 +79,12 @@ public abstract class MixinTrackedEntity implements IETrackedEntity {
         );
     }
     
+    // MC 26.1: ChunkMap.TrackedEntity.broadcastAndSend(Packet) renamed to
+    // sendToTrackingPlayersAndSelf(Packet) (its self-send line still calls
+    // ServerGamePacketListenerImpl.send directly, confirmed via decompile).
     @SuppressWarnings("rawtypes")
     @Redirect(
-        method = "Lnet/minecraft/server/level/ChunkMap$TrackedEntity;broadcastAndSend(Lnet/minecraft/network/protocol/Packet;)V",
+        method = "Lnet/minecraft/server/level/ChunkMap$TrackedEntity;sendToTrackingPlayersAndSelf(Lnet/minecraft/network/protocol/Packet;)V",
         at = @At(
             value = "INVOKE",
             target = "Lnet/minecraft/server/network/ServerGamePacketListenerImpl;send(Lnet/minecraft/network/protocol/Packet;)V"

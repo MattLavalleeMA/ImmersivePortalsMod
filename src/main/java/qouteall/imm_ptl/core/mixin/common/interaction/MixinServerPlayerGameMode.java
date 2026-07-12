@@ -72,6 +72,13 @@ public class MixinServerPlayerGameMode {
     }
     
     // use the actual dimension
+    // MC 26.1: ServerPlayer.level() covariantly overrides Entity.level() to return
+    // ServerLevel (not the erased Level bridge descriptor) -- since the `player`
+    // field here is statically typed ServerPlayer, javac emits the real
+    // ()Lnet/minecraft/server/level/ServerLevel; invokevirtual directly, not the
+    // synthetic Level-returning bridge. Retargeted the descriptor + handler return
+    // type to match (confirmed via javap: ServerPlayer declares both the real
+    // ServerLevel-returning override and a synthetic Level-returning bridge).
     @Redirect(
         method = {
             "incrementDestroyProgress",
@@ -79,10 +86,10 @@ public class MixinServerPlayerGameMode {
         },
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/server/level/ServerPlayer;level()Lnet/minecraft/world/level/Level;"
+            target = "Lnet/minecraft/server/level/ServerPlayer;level()Lnet/minecraft/server/level/ServerLevel;"
         )
     )
-    private Level redirectGetLevel(ServerPlayer instance) {
+    private ServerLevel redirectGetLevel(ServerPlayer instance) {
         return ip_getActualWorld();
     }
     
@@ -104,11 +111,13 @@ public class MixinServerPlayerGameMode {
     }
     
     // disable distance check when doing cross-portal interaction
+    // MC 26.1: Player.canInteractWithBlock(BlockPos, double) renamed to
+    // isWithinBlockInteractionRange(BlockPos, double) (same signature).
     @WrapOperation(
         method = "handleBlockBreakAction",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/server/level/ServerPlayer;canInteractWithBlock(Lnet/minecraft/core/BlockPos;D)Z"
+            target = "Lnet/minecraft/server/level/ServerPlayer;isWithinBlockInteractionRange(Lnet/minecraft/core/BlockPos;D)Z"
         )
     )
     private boolean wrapDistanceInHandleBlockBreakAction(

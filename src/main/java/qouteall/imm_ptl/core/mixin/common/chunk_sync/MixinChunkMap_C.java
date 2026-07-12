@@ -73,8 +73,13 @@ public abstract class MixinChunkMap_C implements IEChunkMap {
      * @author qouteall
      * @reason
      */
+    // MC 26.1: onChunkReadyToSend gained a leading ChunkHolder param (was just
+    // LevelChunk before) -- confirmed via javap/decompile. Kept fully replacing
+    // vanilla's behavior (no markChunkPendingToSend/onChunkReadyToSend(ChunkHolder)/
+    // registerChunk calls), matching the pre-existing @Overwrite design; only the
+    // signature needed updating to match the new real target exactly.
     @Overwrite
-    private void onChunkReadyToSend(LevelChunk chunk) {
+    private void onChunkReadyToSend(ChunkHolder chunkHolder, LevelChunk chunk) {
         ImmPtlChunkTracking.onChunkProvidedDeferred(chunk);
     }
 }

@@ -453,7 +453,7 @@ public class PortalDebugCommands {
             .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
             .executes(context -> {
                 ServerLevel world = context.getSource().getLevel();
-                Iterable<ChunkHolder> chunkHolders = ((IEChunkMap_Accessor) world.getChunkSource().chunkMap).ip_getChunks();
+                Iterable<ChunkHolder> chunkHolders = ((IEChunkMap_Accessor) world.getChunkSource().chunkMap).ip_getVisibleChunkMap().values();
                 
                 Object2IntOpenHashMap<TicketType> stat = new Object2IntOpenHashMap<>();
                 for (ChunkHolder chunkHolder : chunkHolders) {

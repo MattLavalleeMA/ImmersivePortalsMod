@@ -102,7 +102,7 @@ public class DimStackGuiController {
         
         Validate.isTrue(index >= 0 && index <= model.dimStackInfo.entries.size());
         model.dimStackInfo.entries.add(index, entry);
-        view.dimListWidget.children().add(index, view.createDimEntryWidget(entry));
+        syncWidgetsFromModel();
         updateViewState();
         return true;
     }
@@ -116,22 +116,22 @@ public class DimStackGuiController {
         int currentIndex = index;
         for (DimStackEntry entry : entriesToAdd) {
             model.dimStackInfo.entries.add(currentIndex, entry);
-            view.dimListWidget.children().add(currentIndex, view.createDimEntryWidget(entry));
             currentIndex++;
         }
+        syncWidgetsFromModel();
         updateViewState();
     }
     
     public void removeEntry(int index) {
         Validate.isTrue(index >= 0 && index < model.dimStackInfo.entries.size());
         model.dimStackInfo.entries.remove(index);
-        view.dimListWidget.children().remove(index);
+        syncWidgetsFromModel();
         updateViewState();
     }
     
     public void clear() {
         model.dimStackInfo.entries.clear();
-        view.dimListWidget.children().clear();
+        syncWidgetsFromModel();
         updateViewState();
     }
     
@@ -146,9 +146,8 @@ public class DimStackGuiController {
             }
         }
     
-        DimEntryWidget newWidget = view.createDimEntryWidget(newEntry);
-        view.dimListWidget.children().set(index, newWidget);
-        view.dimListWidget.setSelected(newWidget);
+        syncWidgetsFromModel();
+        view.dimListWidget.setSelected(view.dimListWidget.children().get(index));
         updateViewState();
     }
     
@@ -157,10 +156,22 @@ public class DimStackGuiController {
         Validate.isTrue(mouseOver >= 0 && mouseOver < model.dimStackInfo.entries.size());
         
         Helper.swapListElement(model.dimStackInfo.entries, selected, mouseOver);
-        Helper.swapListElement(view.dimListWidget.children(), selected, mouseOver);
+        syncWidgetsFromModel();
         
         updateViewState();
         view.dimListWidget.setSelected(view.dimListWidget.children().get(mouseOver));
+    }
+    
+    // MC 26.1: AbstractSelectionList.children() now returns an unmodifiable view
+    // (was directly mutable before) -- the widget list can no longer be
+    // add/remove/set at an index directly. Rebuild the whole widget list from the
+    // model's entry list instead, via the still-public replaceEntries(Collection).
+    private void syncWidgetsFromModel() {
+        List<DimEntryWidget> widgets = new ArrayList<>(model.dimStackInfo.entries.size());
+        for (DimStackEntry entry : model.dimStackInfo.entries) {
+            widgets.add(view.createDimEntryWidget(entry));
+        }
+        view.dimListWidget.replaceEntries(widgets);
     }
     
     public void initializeAsDefault() {
