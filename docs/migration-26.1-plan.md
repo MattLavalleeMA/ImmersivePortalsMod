@@ -121,17 +121,6 @@ full detail on each in "Outstanding work" below:**
   — kept their control-flow structure (these aren't inherently untranslatable — the
   *bind/clear* calls were fixed or stubbed narrowly) but ultimately call into the
   stubbed drawing helpers above, so portal content won't actually render yet.
-- The terrain-visibility override for portal rendering
-  (`VisibleSectionDiscovery.discoverVisibleSections`, formerly hooked into the
-  now-removed `LevelRenderer.setupRender`) — its structural replacement,
-  `cullTerrain(Camera, Frustum, boolean)`, is built around a fundamentally different
-  `SectionOcclusionGraph`-based algorithm with persistent per-frame traversal state,
-  not the one-shot linear setup the old override can be ported onto by a simple
-  re-anchor.
-- `MixinSodiumOcclusionCuller.java`'s portal cave-culling override — Sodium's own
-  occlusion culling pipeline is now asynchronous/tree-based (confirmed via Sodium's
-  own exact-version-matching source); no single synchronous call site is left to
-  redirect the culling start point on.
 - Cloud-rendering optimization (`MixinLevelRenderer_Clouds.java`, `CloudContext.java`)
   — deleted outright rather than stubbed: `LevelRenderer` no longer has
   `cloudBuffer`/`starBuffer`/`skyBuffer`/`darkBuffer` fields at all (moved to a new
@@ -177,6 +166,11 @@ policy (see the top of this document) — follow the links for the full story.
 - `setupRender`-targeting hooks, re-verified and fixed — [done](migration-26.1-plan-completed.md#setuprender-targeting-hooks-re-verified-and-fixed--done).
 - `MixinLevelRenderer.java`'s ~8 disabled hooks, re-anchored — [implemented, weave-time unverified](migration-26.1-plan-completed.md#mixinlevelrendererjavas-8-disabled-hooks-re-anchored--implemented-weave-time-unverified).
 - Small leftover items (`fabric.mod.json`/`*.mixins.json` stale version metadata) — [done](migration-26.1-plan-completed.md#small-leftover-items-fixed--done).
+- `MixinSodiumOcclusionCuller.java`'s portal cave-culling override, re-anchored against Sodium 0.9.1's redesigned `OcclusionCuller` — [implemented, weave-time unverified](migration-26.1-plan-completed.md#mixinsodiumocclusioncullerjavas-portal-cave-culling-override-re-anchored--implemented-weave-time-unverified).
+- Vanilla terrain-visibility override for portal rendering, re-anchored against `SectionOcclusionGraph`'s redesigned algorithm — [implemented, weave-time unverified](migration-26.1-plan-completed.md#vanilla-terrain-visibility-override-re-anchored-against-sectionocclusiongraph--implemented-weave-time-unverified).
+- Clip-plane shader-source injection (`ShaderCodeTransformation`), re-anchored onto vanilla's `ShaderManager.loadShader` — [implemented (source-injection half only), weave-time unverified](migration-26.1-plan-completed.md#clip-plane-shader-source-injection-re-anchored-onto-shadermanagerloadshader--implemented-source-injection-half-only-weave-time-unverified).
+- `./gradlew runClient` weave-time crash-fixing pass, round 1 (~24 Mixin fixes: renames, signature changes, and a few genuine-redesign items disabled with `require = 0`) — [implemented, launch still in progress](migration-26.1-plan-completed.md#gradlew-runclient-weave-time-crash-fixing-pass-round-1-24-mixin-fixes--implemented-launch-still-in-progress).
+- `./gradlew runClient` weave-time crash-fixing pass, round 2 (~19 more Mixin fixes, including 2 deferred/lazy-loaded ones only surfacing on manual click-through) — [done, client reaches a working main menu](migration-26.1-plan-completed.md#gradlew-runclient-weave-time-crash-fixing-pass-round-2--client-now-reaches-the-main-menu).
 
 ## Blocking / external dependency issues
 
@@ -284,41 +278,99 @@ exposes real handles (`GlTexture.glId()` for the raw GL texture id,
     Blaze3D's own immediate GL calls are unverifiable by `compileJava`/static
     analysis; this is exploratory/prototype work, not a confirmed-safe design yet.
 
+**Local Sodium/Iris jars are a real, exact-version-matching reference source, not
+just GitHub's `main` branch.** The dependency jars Loom already resolved into
+`~/.gradle/caches/modules-2/files-2.1/maven.modrinth/{sodium,iris}/...` are the
+*exact* `mc26.1.2-0.9.1`/`1.11.2+26.1` builds this project depends on — decompilable
+with the same Vineflower jar Loom itself uses
+(`~/.gradle/caches/modules-2/files-2.1/org.vineflower/vineflower/*/vineflower-*.jar`,
+`java -jar <vineflower.jar> <target.jar> <outDir>`), or inspectable class-by-class
+with `inspect_class.py --jar <path-to-jar>` without a full decompile. This found real
+leads GitHub's `main`-branch source search missed (`main` isn't guaranteed to match
+what an exact pinned dependency version actually shipped):
+- Iris ships (but doesn't enable by default) `MixinRenderTarget_StencilBufferTest`,
+  an `@ModifyArgs` on `RenderTarget.createBuffers`'s call to
+  `GpuDevice.createTexture(...)` that swaps the depth `TextureFormat` argument for
+  `IrisPlatformHelpers.getInstance().mojangDepthFormat(DepthBufferFormat.DEPTH_STENCIL)`
+  — i.e. Iris's own developers already prototyped "attach a combined depth+stencil
+  texture to a vanilla `RenderTarget`" as an experiment. However, decompiling
+  `IrisFabricHelpers.mojangDepthFormat` shows it currently returns `null` for every
+  `*_STENCIL*` case — confirming there is **no sanctioned `TextureFormat` enum
+  constant for a combined depth+stencil texture in this MC version at all**, so this
+  particular path is a dead end as-is (Iris's own test can't actually run). Doesn't
+  change the raw-LWJGL-stencil plan above, but does confirm attaching stencil via the
+  *sanctioned* `GpuTexture`/`TextureFormat` layer isn't an option — a real stencil
+  attachment would need a raw GL renderbuffer (`glRenderbufferStorage` with
+  `GL_DEPTH24_STENCIL8`, attached via `glFramebufferRenderbuffer`) bolted directly
+  onto the existing FBO obtained through `GlTexture.getFbo(...)`, bypassing
+  `GpuTexture` entirely rather than trying to get one through it.
+- Iris's own `IrisRenderSystem.blitFramebuffer(int source, int dest, ...)` is a thin
+  wrapper around raw `glBlitFramebuffer` taking plain integer FBO ids (used by
+  `DepthCopyStrategy` for depth-buffer copies) — i.e. Iris solves its own
+  framebuffer-copy problem (the same one `IPIrisHelper`/`RendererUsingFrameBuffer`
+  had) not through any high-level `CommandEncoder.copyTextureToTexture(...)`
+  replacement API, but by dropping to the exact same raw-GL-against-raw-FBO-ids
+  technique already planned for the stencil work above. This *is* a usable lead for
+  the Iris-compatibility renderer stack rebuild below (previously assessed as having
+  none).
+- Sodium 0.9.1 confirms the async/tree-based occlusion pipeline (`CullTask`,
+  `RayOcclusionSectionTree`, `SectionOcclusionGraph`-equivalent) described below, but
+  also disproves the "no hook left" conclusion previously reached about it —
+  `MixinSodiumOcclusionCuller.java`'s portal cave-culling override is now resolved,
+  see "Completed work" above.
+
 Remaining items in this cluster, in priority order (items with a concrete,
 externally-sourced lead first; genuinely-open design work last):
 
 1. Redesign or drop the custom clip-plane shader-uniform injection
-   (`FrontClipping`/`IPGlobal.enableClippingMechanism`) — candidate approach documented
-   in Status above (`ShaderManager.loadShader`'s `IOUtils.toString(Reader)` +
-   `RenderSystem.bindDefaultUniforms`). Has a specific technical plan already, not yet
-   implemented.
+   (`FrontClipping`/`IPGlobal.enableClippingMechanism`). **Why this can't just reuse the
+   raw-OpenGL-bypass trick planned for stencil masking above:** stencil testing is a
+   pure fixed-function per-fragment test — a raw `glStencilFunc`/`glEnable` call around
+   a draw affects it regardless of what shader ran, no shader source involved. Clip
+   planes are fundamentally different: `gl_ClipDistance[0]` is a **per-vertex shader
+   output** — a raw `glEnable(GL_CLIP_DISTANCE0)` call does nothing unless the bound
+   vertex shader itself is compiled to write to `gl_ClipDistance[0]`, which none of
+   vanilla's shaders do. So this genuinely needs shader-source cooperation, not just a
+   raw GL state call; the two items aren't solvable by the same technique.
+   
+   The GLSL-injection half is done — see "Completed work" above (`ShaderCodeTransformation`
+   re-anchored onto `ShaderManager.loadShader` via `MixinShaderManager.java`).
+   
+   **Still open — confirmed via decompiled `RenderPipeline`/`RenderPipelines` source to
+   be more than "just set the uniform value":** `RenderPipeline.Builder.withUniform(String,
+   UniformType)` shows every vanilla pipeline explicitly declares its own uniform list
+   in Java at registration time (`net.minecraft.client.renderer.RenderPipelines`), not
+   just via GLSL text — so `iportal_ClippingEquation` also needs a matching
+   `.withUniform(...)` declaration added to every affected pipeline (or to a shared
+   `Builder`/"snippet" they all derive from, if one exists — not yet checked), before
+   `RenderSystem.bindDefaultUniforms(RenderPass)` can actually bind a per-frame value
+   to it. `FrontClipping.updateClippingEquationUniformForCurrentShader`/
+   `unsetClippingUniform` remain stubbed no-ops pending this. Checked Distant Horizons'
+   decompiled source for a clip-plane lead — no `ClipDistance`/`GL_CLIP`/clip-plane code
+   anywhere in its tree, and its `render/blaze/` (post-rewrite) package has zero
+   stencil-related calls either — no externally-sourced lead for the
+   uniform-declaration piece specifically; still needs a real game launch to validate
+   once implemented.
 2. Rebuild the Iris-compatibility renderer stack (`ExperimentalIrisPortalRenderer`/
    `IrisPortalRenderer`/`IrisCompatibilityPortalRenderer`/`IPIrisHelper`), currently
-   stubbed to no-ops. Checked whether
-   [IrisShaders/Iris](https://github.com/IrisShaders/Iris)'s own `26.1` branch (exact
-   version match) already solves `IPIrisHelper.java`'s framebuffer-copy problem
-   (`RenderTarget.frameBufferId`/`getColorTextureId()`/`getDepthTextureId()` all
-   removed, real replacement is `CommandEncoder.copyTextureToTexture(...)`) — no match
-   found for `copyTextureToTexture` anywhere in Iris's source, so unlike items above,
-   there's no quick externally-sourced lead here. Optional-dependency compat code (only
-   matters with Iris installed), no crash risk since it's already fully stubbed — lower
-   priority than the two items above.
-3. Redesign the terrain-visibility override for portal rendering
-   (`VisibleSectionDiscovery.discoverVisibleSections`, formerly hooked into the
-   now-removed `setupRender`) against `cullTerrain(Camera, Frustum, boolean)`'s
-   `SectionOcclusionGraph`-based algorithm — a fundamentally different,
-   persistent-per-frame-state design that the old one-shot override can't be
-   ported onto by a simple re-anchor. Needs real design work, not a rename.
-4. Redesign `MixinSodiumOcclusionCuller.java`'s portal cave-culling override against
-   Sodium's new **asynchronous, tree-based** occlusion culling pipeline (confirmed via
-   Sodium's own exact-version-matching source, tag `mc26.1.2-0.9.1` —
-   `RenderSectionManager` now schedules `CullTask`s on a background thread; there's no
-   single synchronous call site left to redirect the culling start point on). Not a
-   quick rename fix like `MixinDebugRenderer.java`'s was — full detail in
-   [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#mixinsodiumocclusioncullerjava-investigated--not-a-quick-fix-real-redesign-needed).
-   Also an optional-dependency compat item, already stubbed to vanilla-equivalent
-   behavior (performance-only regression, not a crash) — same priority tier as Iris
-   above.
+   stubbed to no-ops. Previously checked IrisShaders/Iris's GitHub `main` branch for a
+   `copyTextureToTexture` replacement and found nothing; decompiling the actual pinned
+   `1.11.2+26.1` jar (see above) found a real lead instead —
+   `IrisRenderSystem.blitFramebuffer(int, int, ...)`, a raw `glBlitFramebuffer` call
+   against plain FBO ids, is Iris's own real solution to the same framebuffer-copy
+   problem. The remaining work is obtaining `IPIrisHelper`'s own raw FBO ids the same
+   way the stencil-masking plan above does
+   (`GlTexture.getFbo(DirectStateAccess, GpuTexture)`, cast down from
+   `RenderTarget.getColorTexture()`/`.getDepthTexture()`), then issuing the same raw
+   blit call directly (no Iris API dependency needed, since the technique itself is
+   just raw LWJGL/OpenGL, not an Iris-specific mechanism). Optional-dependency compat
+   code (only matters with Iris installed), no crash risk since it's already fully
+   stubbed — still needs a real game launch to verify, but no longer a "no lead"
+   item.
+
+Two further items in this cluster — the vanilla terrain-visibility override
+(`VisibleSectionDiscovery`/`SectionOcclusionGraph`) and `MixinSodiumOcclusionCuller
+.java`'s portal cave-culling override — are now done; see "Completed work" above.
 
 ## Tooling
 
@@ -353,18 +405,78 @@ Scripts live in `migration_tools/` (pure Python stdlib, no pip packages needed):
 
 ## Next steps
 
-1. **All compile errors and known weave-time-crash risks are fixed.** The
-   project compiles with **0 errors** (full changelog in
+1. **All compile errors are fixed.** The project compiles with **0 errors**
+   (full changelog in
    [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md)).
    Re-run `parse_compile_errors.py --run` at the start of the next session to
    confirm this hasn't regressed.
 2. **Get the mod to actually launch in a dev environment** (`./gradlew
-   runClient`) with portal rendering left in its current stubbed/no-op state —
-   this is the single most valuable next step, since it's the prerequisite for
-   verifying every Mixin re-anchor/retarget fixed so far (none of them are
-   checkable by `compileJava`) and for surfacing anything still broken.
-3. Only after that baseline works should the remaining "Outstanding work" items
+   runClient`) — **main menu now reached successfully.** Since
+   `imm_ptl.mixins.json` requires every mixin to apply, each launch attempt
+   used to abort on the first weave-time crash and surface exactly one new
+   issue (a rename/signature-change/removal invisible to `compileJava`); two
+   rounds (~24 + ~19 fixes) got the client all the way to a fully working,
+   clickable title screen — full detail in
+   [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#gradlew-runclient-weave-time-crash-fixing-pass-round-1-24-mixin-fixes--implemented-launch-still-in-progress)
+   and
+   [round 2](migration-26.1-plan-completed.md#gradlew-runclient-weave-time-crash-fixing-pass-round-2--client-now-reaches-the-main-menu).
+
+   **Important:** a clean main-menu launch does **not** mean every Mixin is
+   fixed. Many mixin targets (any per-button `Screen` subclass, event-factory
+   lambdas triggered on first fire, etc.) are only classloaded — and thus only
+   weave-time-validated — when a specific menu/feature is actually used. Round
+   2 already found two such **deferred** issues this way (`MixinSplashManager_CVB`'s
+   immutable-list crash, which was actually the root cause of a fully
+   black/blank-but-responsive title screen with **no logged Mixin error at
+   all**; and `MixinCreateWorldScreen_CVB`'s constructor signature change,
+   which only threw when clicking Singleplayer → Create New World).
+
+   **Immediate next action:** keep `./gradlew runClient` running and manually
+   click through menus/features one at a time (Singleplayer world list,
+   Create World, Multiplayer, Options/video settings, Mod Menu's config
+   screens, actually joining a world, portal creation/use, etc.), fixing each
+   new deferred crash as it's hit using the same established workflow — read
+   the crash log for the failing mixin class/target symbol, extract the real
+   current class shape from the sources jar
+   (`.gradle/loom-cache/minecraftMaven/net/minecraft/minecraft-merged-*/26.1.2/*-sources.jar`,
+   via `zipfile.ZipFile(jar).extract('path/To/Class.java', path='migration_tools/reports/decompiled_src2')`
+   — check that directory first, many classes already extracted from prior
+   fixes; Sodium/Iris jars decompile similarly from
+   `~/.gradle/caches/modules-2/files-2.1/net.fabricmc.fabric-api/.../*.jar` or
+   the relevant Sodium/Iris module jar under `~/.gradle/caches/modules-2/`,
+   with Vineflower, or use `migration_tools/inspect_class.py --private
+   [--jar <path>]` for a fast `javap`-based signature check first), fix/
+   retarget the mixin (or disable with `require = 0` + a comment if it needs
+   genuine redesign), confirm `python migration_tools/parse_compile_errors.py
+   --run` still shows 0 errors, then relaunch and keep clicking through.
+
+   Also worth a blind pre-emptive check for a black/blank screen with **no**
+   Mixin-apply error logged: grep the log broadly for `Caught error`/`ERROR`
+   (not just Mixin-specific patterns), since a swallowed exception in an
+   unrelated subsystem (like the `SplashManager` case above) can silently
+   break something without ever showing as a Mixin crash.
+
+   **Known remaining risk areas not yet reached by a launch/click-through
+   attempt:** `qouteall.imm_ptl.peripheral.*` (only lightly touched so far,
+   already yielded `MixinCreateWorldScreen_CVB`); `qouteall.dimlib.*` (merged
+   into this repo as a module, not touched at all yet); anything gated behind
+   `enable_sodium`/`enable_iris` (both `true` in `gradle.properties`, so those
+   mixins are being woven and could still crash, coverage incomplete);
+   in-world/portal-specific mixins (nothing has joined a world yet in any
+   verified launch); the server-side-only path (only ever launched via
+   `runClient`, which loads an integrated server too — a dedicated `runServer`
+   launch might surface different mixins in a different order).
+3. **Once the client actually launches successfully:** follow the in-game
+   testing checklist already written up below (fog, debug renderer, portal
+   creation, chunk loading/ticket behavior, watch for stutter near portals from
+   the Sodium/`SectionOcclusionGraph` fixes, etc.), and update this document's
+   "Status"/compile-state sections plus
+   [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md)'s
+   "weave-time unverified" annotations once each corresponding fix is confirmed
+   actually working in-game, not just non-crashing.
+4. Only after that baseline works should the remaining "Outstanding work" items
    be tackled, in the priority order listed there — they all need real in-game
    visual feedback to get right, not just static analysis.
+
 
 

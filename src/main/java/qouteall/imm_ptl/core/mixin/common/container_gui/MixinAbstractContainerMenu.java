@@ -13,11 +13,21 @@ import qouteall.imm_ptl.core.block_manipulation.BlockManipulationServer;
 
 @Mixin(AbstractContainerMenu.class)
 public class MixinAbstractContainerMenu {
+    // MC 26.1: the old intermediary/Yarn-mapped lambda name `method_17696` is
+    // meaningless now that MC ships unobfuscated -- the real (deterministic,
+    // compiler-generated) name of this lambda, confirmed via `javap -p` on the real
+    // class, is `lambda$stillValid$0(Block, Player, Level, BlockPos): Boolean` (the
+    // capture-then-declared-params order of the lambda
+    // `(level, pos) -> ... player.isWithinBlockInteractionRange(pos, 4.0)` inside
+    // `AbstractContainerMenu.stillValid(ContainerLevelAccess, Player, Block)`, confirmed
+    // via decompiled source). Also renamed the wrapped call itself:
+    // Player.canInteractWithBlock(BlockPos, double) -> isWithinBlockInteractionRange
+    // (same signature), same rename as MixinContainer.java's sibling fix.
     @WrapOperation(
-        method = "method_17696",
+        method = "lambda$stillValid$0",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/world/entity/player/Player;canInteractWithBlock(Lnet/minecraft/core/BlockPos;D)Z"
+            target = "Lnet/minecraft/world/entity/player/Player;isWithinBlockInteractionRange(Lnet/minecraft/core/BlockPos;D)Z"
         )
     )
     private static boolean wrapDistanceToSqr(

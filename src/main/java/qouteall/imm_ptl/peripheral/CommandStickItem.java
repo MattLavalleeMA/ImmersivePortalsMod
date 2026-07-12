@@ -21,6 +21,8 @@ import net.minecraft.commands.Commands;
 import net.minecraft.core.Registry;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
@@ -39,6 +41,7 @@ import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.component.TooltipDisplay;
 import net.minecraft.world.level.Level;
 import qouteall.imm_ptl.core.IPGlobal;
+import qouteall.imm_ptl.core.McHelper;
 import qouteall.imm_ptl.core.commands.PortalCommand;
 
 public class CommandStickItem extends Item {
@@ -95,8 +98,12 @@ public class CommandStickItem extends Item {
         BUILT_IN_COMMAND_STICK_TYPES.put(data.command, data);
     }
     
+    // MC 26.1: Item's constructor now requires Properties.setId(ResourceKey) to have
+    // been called first (see PortalPlaceholderBlock.java for the analogous Block-side
+    // explanation) -- set here to the same identifier used later in
+    // PeripheralModMain.registerItems ("immersive_portals:command_stick").
     public static final CommandStickItem instance = new CommandStickItem(
-        new Item.Properties()
+        new Item.Properties().setId(ResourceKey.create(Registries.ITEM, McHelper.newResourceLocation("immersive_portals:command_stick")))
     );
     
     public CommandStickItem(Properties settings) {

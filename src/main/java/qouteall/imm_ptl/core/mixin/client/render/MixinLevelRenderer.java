@@ -1,6 +1,8 @@
 package qouteall.imm_ptl.core.mixin.client.render;
 
 import com.llamalad7.mixinextras.sugar.Local;
+import com.mojang.blaze3d.buffers.GpuBufferSlice;
+import com.mojang.blaze3d.framegraph.FrameGraphBuilder;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -113,8 +115,14 @@ public abstract class MixinLevelRenderer implements IEWorldRenderer {
     // @Redirect targets aren't checked by compileJava) were removed; see
     // redirectSubmitEntity below for the replacement.
     
-    @Shadow
-    private PostChain transparencyChain;
+    // NOTE: LevelRenderer no longer caches a `transparencyChain` field or exposes a
+    // `deinitTransparency()` method at all (confirmed absent from decompiled MC 26.1.2
+    // source) -- `getTransparencyChain()` is now a private method that fetches the
+    // PostChain fresh from `this.minecraft.getShaderManager().getPostChain(...)` on every
+    // call, with no per-instance cached state to save/restore/dispose. The @Shadow for the
+    // field and the abstract-method shadow for deinitTransparency() (both real weave-time-
+    // crash risks, since @Shadow targets aren't checked by compileJava) were removed; see
+    // portal_getTransparencyShader/portal_setTransparencyShader below, now stubbed no-ops.
     
     @Mutable
     @Shadow
@@ -124,11 +132,12 @@ public abstract class MixinLevelRenderer implements IEWorldRenderer {
     @Shadow
     private int lastViewDistance;
     
-    @Shadow
-    private Frustum cullingFrustum;
-    
-    @Shadow
-    protected abstract void deinitTransparency();
+    // NOTE: LevelRenderer no longer caches a `cullingFrustum` field either (confirmed
+    // absent from decompiled MC 26.1.2 source) -- the cull frustum is now derived fresh
+    // each frame from `Camera.getCullFrustum()`/`CameraRenderState.cullFrustum`, not
+    // stored on the renderer instance. The @Shadow was removed; see
+    // portal_getFrustum/portal_setFrustum below, now stubbed no-ops (same rationale as
+    // the transparency-shader fields above).
     
     @Shadow
     private @Nullable SectionRenderDispatcher sectionRenderDispatcher;
@@ -398,19 +407,18 @@ public abstract class MixinLevelRenderer implements IEWorldRenderer {
         // make hand rendering normal
         minecraft.gameRenderer.getLighting().updateLevel(CardinalLighting.Type.DEFAULT);
     }
-    @Redirect(
-        method = "renderLevel",
-        at = @At(
-            value = "INVOKE",
-            target = "Lnet/minecraft/client/Minecraft;shouldEntityAppearGlowing(Lnet/minecraft/world/entity/Entity;)Z"
-        )
-    )
-    private boolean redirectGlowing(Minecraft client, Entity entity) {
-        if (WorldRenderInfo.isRendering()) {
-            return false;
-        }
-        return client.shouldEntityAppearGlowing(entity);
-    }
+    
+    // MC 26.1: the old redirect on `Minecraft.shouldEntityAppearGlowing(Entity)` called
+    // directly from inside `LevelRenderer.renderLevel` has no equivalent call site left in
+    // this class at all (confirmed absent from decompiled source -- the glowing check now
+    // happens during per-entity render-state extraction, baked into a
+    // `EntityRenderState.appearsGlowing` field read later, not a live call inside
+    // renderLevel). The method itself (`Minecraft.shouldEntityAppearGlowing`) still exists
+    // unchanged though (confirmed via `javap`), and real mods overriding this exact behavior
+    // (e.g. Moulberry/Flashback's MixinMinecraft) mixin directly into it instead of chasing
+    // its call sites -- moved this override to MixinMinecraft.java as a HEAD-cancellable
+    // @Inject on the method itself, functionally identical (suppress glowing while rendering
+    // portal content) but future-proof against the call site moving again.
     
     //reload other world renderers when the main world renderer is reloaded
     @Inject(method = "allChanged", at = @At("TAIL"))
@@ -426,12 +434,22 @@ public abstract class MixinLevelRenderer implements IEWorldRenderer {
         ClientWorldLoader._onWorldRendererReloaded();
     }
     
+    // MC 26.1: LevelRenderer.renderSky(Matrix4f, Matrix4f, float, Camera, boolean, Runnable)
+    // is gone entirely -- sky drawing is no longer immediate-mode. It's split into (1) an
+    // earlier state-extraction step (`SkyRenderer.extractRenderState`, unrelated to this
+    // mixin) and (2) `addSkyPass(FrameGraphBuilder, CameraRenderState, GpuBufferSlice)`,
+    // which schedules a deferred `FramePass` whose `pass.executes(...)` lambda does the
+    // actual GpuSampler/pipeline draw calls later. Confirmed via cross-mod GitHub search
+    // (Moulberry/Flashback, tranarchy/nicotine, MeteorDevelopment/meteor-client all mixin
+    // `addSkyPass` on this MC version) and the local decompiled source (3-param signature,
+    // no trailing Matrix4fc on this exact 26.1.2 build unlike some adjacent-version repos).
+    // Cancelling `addSkyPass` itself (HEAD, cancellable) skips scheduling the pass entirely,
+    // same net effect as the old cancel-at-HEAD-of-renderSky.
     @Inject(
-        method = "renderSky", at = @At("HEAD"), cancellable = true
+        method = "addSkyPass", at = @At("HEAD"), cancellable = true
     )
     private void onRenderSkyBegin(
-        Matrix4f modelView, Matrix4f matrix4f, float partialTick, Camera camera,
-        boolean isFoggy, Runnable runnable, CallbackInfo ci
+        FrameGraphBuilder frame, CameraRenderState cameraState, GpuBufferSlice skyFog, CallbackInfo ci
     ) {
         if (WorldRenderInfo.isRendering()) {
             if (!WorldRenderInfo.getTopRenderInfo().doRenderSky) {
@@ -440,37 +458,39 @@ public abstract class MixinLevelRenderer implements IEWorldRenderer {
                 }
             }
         }
-        
+    }
+    
+    // The mirror-face-culling apply/recover pair moved from wrapping the whole (now gone)
+    // renderSky call to wrapping just the deferred draw lambda instead -- same
+    // `lambda$<method>$N` targeting technique already used for addMainPass's own lambda
+    // below (onBeforeRenderingLayer/onAfterRenderingLayer), since that's the actual point
+    // the GPU draw calls happen now, not addSkyPass's own (synchronous, draw-free) body.
+    // Confirmed exact real (unobfuscated) name + signature via `javap -p` on the compiled
+    // class: `private static void lambda$addSkyPass$0(GpuBufferSlice, SkyRenderState,
+    // SkyRenderer)` -- static (unlike addMainPass's lambda) since it captures no `this`,
+    // so the handler methods must be static too.
+    @Inject(method = "lambda$addSkyPass$0", at = @At("HEAD"))
+    private static void onBeforeSkyPassLambda(CallbackInfo ci) {
         if (PortalRendering.isRenderingOddNumberOfMirrors()) {
             MyRenderHelper.applyMirrorFaceCulling();
         }
     }
     
-    @Inject(
-        method = "renderSky",
-        at = @At("RETURN")
-    )
-    private void onRenderSkyEnd(
-        Matrix4f modelView, Matrix4f matrix4f, float f, Camera camera,
-        boolean bl, Runnable runnable, CallbackInfo ci
-    ) {
-        MyRenderHelper.recoverFaceCulling();
+    @Inject(method = "lambda$addSkyPass$0", at = @At("RETURN"))
+    private static void onAfterSkyPassLambda(CallbackInfo ci) {
+        if (PortalRendering.isRenderingOddNumberOfMirrors()) {
+            MyRenderHelper.recoverFaceCulling();
+        }
     }
     
-    // correct the eye position for sky rendering
-    @Redirect(
-        method = "renderSky",
-        at = @At(
-            value = "INVOKE",
-            target = "Lnet/minecraft/client/player/LocalPlayer;getEyePosition(F)Lnet/minecraft/world/phys/Vec3;"
-        )
-    )
-    private Vec3 redirectGetEyePositionInSkyRendering(LocalPlayer player, float partialTicks) {
-        if (WorldRenderInfo.isRendering()) {
-            return WorldRenderInfo.getCameraPos();
-        }
-        return player.getEyePosition(partialTicks);
-    }
+    // MC 26.1: the old redirect on `LocalPlayer.getEyePosition(float)` inside `renderSky`
+    // has no equivalent anchor anymore -- `addSkyPass`'s new signature works entirely off
+    // pre-extracted `CameraRenderState`/`SkyRenderState` data (angles/colors), with no live
+    // eye-position lookup call left in the sky-drawing path at all (confirmed absent from
+    // decompiled source). The portal-adjusted camera position is already carried correctly
+    // by the `Camera` object itself (set up via `ip_setCamera`/`portal_setPos` earlier in
+    // MyGameRenderer's dimension-switch), so this redirect is fully superseded -- removed
+    // rather than stubbed.
     
     // vanilla clears translucentFramebuffer even when transparencyShader is null
     // it makes the framebuffer to be wrongly bound in fabulous mode
@@ -592,14 +612,18 @@ public abstract class MixinLevelRenderer implements IEWorldRenderer {
     ) {
     }
     
+    // Stubbed no-ops: LevelRenderer no longer caches a transparencyChain field to
+    // save/null-out/restore around portal-content rendering (see NOTE above) -- the
+    // replacement `getTransparencyChain()` always fetches a fresh PostChain from the
+    // ShaderManager, so there's no stale per-instance state left for callers (e.g.
+    // MyGameRenderer.java's dimension-switch save/restore) to worry about.
     @Override
     public PostChain portal_getTransparencyShader() {
-        return transparencyChain;
+        return null;
     }
     
     @Override
     public void portal_setTransparencyShader(PostChain arg) {
-        transparencyChain = arg;
     }
     
     @Override
@@ -614,17 +638,17 @@ public abstract class MixinLevelRenderer implements IEWorldRenderer {
     
     @Override
     public Frustum portal_getFrustum() {
-        return cullingFrustum;
+        return null;
     }
     
     @Override
     public void portal_setFrustum(Frustum arg) {
-        cullingFrustum = arg;
     }
     
     @Override
     public void portal_fullyDispose() {
-        deinitTransparency();
+        // TODO MC 26.1: deinitTransparency() no longer exists (see NOTE above) -- nothing
+        // to dispose here anymore for the transparency PostChain either.
         
         // TODO MC 26.1: starBuffer/skyBuffer/darkBuffer/cloudBuffer no longer exist on
         // LevelRenderer (sky/cloud rendering moved to dedicated SkyRenderer/CloudRenderer

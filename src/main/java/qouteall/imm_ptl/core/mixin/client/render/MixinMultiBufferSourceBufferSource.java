@@ -12,8 +12,13 @@ import qouteall.imm_ptl.core.render.context_management.RenderStates;
 
 @Mixin(MultiBufferSource.BufferSource.class)
 public class MixinMultiBufferSourceBufferSource {
+    // NOTE: the method descriptor string literal below must use the real current package
+    // (renderer.rendertype.RenderType) -- bulk_rename.py's import/usage rewriting doesn't
+    // touch string literals inside annotations, so this stale `Lnet/minecraft/client/
+    // renderer/RenderType;` (pre-migration package) silently survived every prior rename
+    // pass and only failed at weave time.
     @Inject(
-        method = "endBatch(Lnet/minecraft/client/renderer/RenderType;)V",
+        method = "endBatch(Lnet/minecraft/client/renderer/rendertype/RenderType;)V",
         at = @At("HEAD")
     )
     private void onBeginDraw(RenderType layer, CallbackInfo ci) {
@@ -24,7 +29,7 @@ public class MixinMultiBufferSourceBufferSource {
     }
     
     @Inject(
-        method = "endBatch(Lnet/minecraft/client/renderer/RenderType;)V",
+        method = "endBatch(Lnet/minecraft/client/renderer/rendertype/RenderType;)V",
         at = @At("RETURN")
     )
     private void onEndDraw(RenderType layer, CallbackInfo ci) {

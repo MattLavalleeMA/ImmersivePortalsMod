@@ -23,11 +23,14 @@ public abstract class MixinMinecraftServer_DimStack_CVB {
     @Final
     private Map<ResourceKey<Level>, ServerLevel> levels;
     
+    // MC 26.1: MinecraftServer.setInitialSpawn gained a 5th param
+    // (LevelLoadListener) -- confirmed via decompiled 26.1.2 source, otherwise
+    // unchanged; the @At INVOKE target string needed updating to match.
     @Inject(
         method = "Lnet/minecraft/server/MinecraftServer;createLevels()V",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/server/MinecraftServer;setInitialSpawn(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/world/level/storage/ServerLevelData;ZZ)V"
+            target = "Lnet/minecraft/server/MinecraftServer;setInitialSpawn(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/world/level/storage/ServerLevelData;ZZLnet/minecraft/server/level/progress/LevelLoadListener;)V"
         )
     )
     private void onBeforeSetupSpawn(CallbackInfo ci) {

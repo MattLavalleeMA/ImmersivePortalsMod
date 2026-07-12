@@ -17,11 +17,16 @@ import qouteall.imm_ptl.core.block_manipulation.BlockManipulationServer;
 @SuppressWarnings("ALL")
 @Mixin(Container.class)
 public interface MixinContainer {
+    // MC 26.1: Player.canInteractWithBlock(BlockPos, double) was renamed to
+    // isWithinBlockInteractionRange(BlockPos, double) (confirmed via decompiled 26.1.2
+    // source -- same signature/semantics, just a rename; the call site inside
+    // Container.stillValidBlockEntity(BlockEntity, Player, float) is otherwise
+    // unchanged).
     @WrapOperation(
         method = "stillValidBlockEntity(Lnet/minecraft/world/level/block/entity/BlockEntity;Lnet/minecraft/world/entity/player/Player;F)Z",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/world/entity/player/Player;canInteractWithBlock(Lnet/minecraft/core/BlockPos;D)Z"
+            target = "Lnet/minecraft/world/entity/player/Player;isWithinBlockInteractionRange(Lnet/minecraft/core/BlockPos;D)Z"
         )
     )
     private static boolean wrapCanInteractWithBlock(

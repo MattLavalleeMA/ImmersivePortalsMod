@@ -18,9 +18,11 @@ import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.core.Registry;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -33,10 +35,17 @@ import net.minecraft.world.item.component.TooltipDisplay;
 import net.minecraft.world.level.Level;
 import qouteall.imm_ptl.core.IPCGlobal;
 import qouteall.imm_ptl.core.IPMcHelper;
+import qouteall.imm_ptl.core.McHelper;
 import qouteall.imm_ptl.core.block_manipulation.BlockManipulationServer;
 
 public class PortalWandItem extends Item {
-    public static final PortalWandItem instance = new PortalWandItem(new Properties());
+    // MC 26.1: Item's constructor now requires Properties.setId(ResourceKey) to have
+    // been called first (see PortalPlaceholderBlock.java for the analogous Block-side
+    // explanation) -- set here to the same identifier used later in
+    // PeripheralModMain.registerItems ("immersive_portals:portal_wand").
+    public static final PortalWandItem instance = new PortalWandItem(
+        new Properties().setId(ResourceKey.create(Registries.ITEM, McHelper.newResourceLocation("immersive_portals:portal_wand")))
+    );
     
     public static void init() {
         Registry.register(

@@ -33,7 +33,6 @@ import qouteall.q_misc_util.my_util.LimitedLogger;
 
 import java.util.List;
 import java.util.Map;
-import java.util.function.Supplier;
 
 @Mixin(ClientLevel.class)
 public abstract class MixinClientLevel implements IEClientWorld {
@@ -94,14 +93,20 @@ public abstract class MixinClientLevel implements IEClientWorld {
     }
     
     //use my client chunk manager
+    // MC 26.1: ClientLevel's constructor no longer takes a Supplier param (stale from
+    // an older version) and gained a trailing `int seaLevel` param -- confirmed via
+    // decompiled 26.1.2 source: real signature is (ClientPacketListener,
+    // ClientLevelData, ResourceKey<Level>, Holder<DimensionType>, int serverChunkRadius,
+    // int serverSimulationDistance, LevelRenderer, boolean isDebug, long
+    // biomeZoomSeed, int seaLevel).
     @Inject(
         method = "<init>",
         at = @At("RETURN")
     )
     void onConstructed(
         ClientPacketListener clientPacketListener, ClientLevel.ClientLevelData clientLevelData,
-        ResourceKey resourceKey, Holder holder, int loadDistance, int j, Supplier supplier,
-        LevelRenderer levelRenderer, boolean bl, long l, CallbackInfo ci
+        ResourceKey resourceKey, Holder holder, int loadDistance, int j,
+        LevelRenderer levelRenderer, boolean bl, long l, int seaLevel, CallbackInfo ci
     ) {
         ClientLevel clientWorld = (ClientLevel) (Object) this;
         ClientChunkCache myClientChunkManager =

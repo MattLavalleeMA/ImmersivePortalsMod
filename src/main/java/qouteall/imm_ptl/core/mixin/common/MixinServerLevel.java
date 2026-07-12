@@ -3,7 +3,9 @@ package qouteall.imm_ptl.core.mixin.common;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.entity.PersistentEntitySectionManager;
+import net.minecraft.world.level.saveddata.WeatherData;
 import net.minecraft.world.level.storage.SavedDataStorage;
 import net.minecraft.world.level.storage.ServerLevelData;
 import org.spongepowered.asm.mixin.Final;
@@ -17,8 +19,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import qouteall.imm_ptl.core.chunk_loading.ImmPtlChunkTracking;
 import qouteall.imm_ptl.core.ducks.IEEntity;
 import qouteall.imm_ptl.core.ducks.IEServerWorld;
-
-import java.util.List;
 
 @Mixin(ServerLevel.class)
 public abstract class MixinServerLevel implements IEServerWorld {
@@ -37,20 +37,46 @@ public abstract class MixinServerLevel implements IEServerWorld {
     @Final
     private PersistentEntitySectionManager<Entity> entityManager;
     
+    // MC 26.1: Level.prepareWeather() (no-arg) is fully gone -- confirmed via decompiled
+    // 26.1.2 source: weather-gradient initialization moved to this new private
+    // ServerLevel.prepareWeather(WeatherData) (applied from a persistent WeatherData
+    // saved-data object at level load, called from ServerLevel's own constructor-time
+    // setup). Re-anchored here from MixinLevel.java (which could no longer target this
+    // method at all, since it moved off the shared Level base class onto ServerLevel
+    // specifically, and gained a parameter).
+    // Fix overworld rain cause nether fog change
+    @Inject(method = "prepareWeather", at = @At("TAIL"))
+    private void ip_onPrepareWeather(WeatherData weatherData, CallbackInfo ci) {
+        ServerLevel this_ = (ServerLevel) (Object) this;
+        if (this_.dimension() == Level.NETHER) {
+            this_.setRainLevel(0);
+            this_.setThunderLevel(0);
+        }
+    }
+    
     //in vanilla if a dimension has no player and no forced chunks then it will not tick
+    // MC 26.1: ServerLevel.tick(BooleanSupplier)'s old `if (!players.isEmpty() ||
+    // !forcedChunks.isEmpty()) { ... }`-style gating (a plain List.isEmpty() call) is
+    // fully gone -- confirmed via decompiled 26.1.2 source: activity is now gated by
+    // `this.chunkSource.hasActiveTickets()` (a single boolean, encompassing both the
+    // player and forced-chunk cases uniformly) plus a separate `emptyTime < 300`
+    // grace-period counter. Re-anchored to redirect hasActiveTickets() instead of the
+    // removed List.isEmpty() call -- same intent (force this dimension to look
+    // "active" when ImmPtl wants it loaded), just inverted (true forces active,
+    // whereas the old redirect returned false to mean "list is not empty").
     @Redirect(
         method = "Lnet/minecraft/server/level/ServerLevel;tick(Ljava/util/function/BooleanSupplier;)V",
         at = @At(
             value = "INVOKE",
-            target = "Ljava/util/List;isEmpty()Z"
+            target = "Lnet/minecraft/server/level/ServerChunkCache;hasActiveTickets()Z"
         )
     )
-    private boolean redirectIsEmpty(List list) {
+    private boolean redirectIsEmpty(ServerChunkCache chunkSource) {
         final ServerLevel this_ = (ServerLevel) (Object) this;
         if (ImmPtlChunkTracking.shouldLoadDimension(this_.dimension())) {
-            return false;
+            return true;
         }
-        return list.isEmpty();
+        return chunkSource.hasActiveTickets();
     }
     
     // for debug

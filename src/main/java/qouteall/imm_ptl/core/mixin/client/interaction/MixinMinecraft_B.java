@@ -13,8 +13,11 @@ import qouteall.imm_ptl.core.block_manipulation.BlockManipulationClient;
 
 @Mixin(Minecraft.class)
 public abstract class MixinMinecraft_B {
+    // MC 26.1: Minecraft.pickBlock() was renamed to pickBlockOrEntity() (confirmed via
+    // decompiled 26.1.2 source -- same no-arg void signature, called from the same spot
+    // in handleKeybinds()).
     @Shadow
-    protected abstract void pickBlock();
+    protected abstract void pickBlockOrEntity();
     
     @Shadow
     public ClientLevel level;
@@ -104,7 +107,7 @@ public abstract class MixinMinecraft_B {
         method = "handleKeybinds",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/client/Minecraft;pickBlock()V"
+            target = "Lnet/minecraft/client/Minecraft;pickBlockOrEntity()V"
         )
     )
     private void wrapPickBlock(Minecraft instance, Operation<Void> original) {

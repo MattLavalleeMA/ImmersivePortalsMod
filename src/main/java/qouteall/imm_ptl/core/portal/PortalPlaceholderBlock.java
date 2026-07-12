@@ -6,6 +6,8 @@ import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelAccessor;
@@ -55,8 +57,16 @@ public class PortalPlaceholderBlock extends Block {
         10.0D
     );
     
+    // MC 26.1: BlockBehaviour's constructor now requires Properties.setId(ResourceKey)
+    // to have been called first (confirmed via decompiled 26.1.2 source --
+    // BlockBehaviour.Properties.effectiveDrops() null-checks the id -- vanilla's own
+    // Blocks.register(id, properties) does `factory.apply(properties.setId(id))` before
+    // constructing). Set explicitly here to the same identifier used later in
+    // IPModMain.registerBlocks, since this field is constructed (via <clinit>) before
+    // that registration call ever runs.
     public static final PortalPlaceholderBlock instance = new PortalPlaceholderBlock(
         BlockBehaviour.Properties.of()
+            .setId(ResourceKey.create(Registries.BLOCK, McHelper.newResourceLocation("immersive_portals", "nether_portal_block")))
             .noCollision()
             .sound(SoundType.GLASS)
             .strength(1.0f, 0)

@@ -151,12 +151,34 @@ public abstract class MixinEntity implements IEEntity, ImmPtlEntityExtension {
         }
     }
     
+    // MC 26.1: Entity.checkInsideBlocks() (the old single-shot per-tick, single
+    // this.getBoundingBox()-based check) is fully gone -- confirmed via decompiled
+    // 26.1.2 source and javap: it's been redesigned into a multi-step, per-movement
+    // system (checkInsideBlocks(List<Entity.Movement>, InsideBlockEffectApplier
+    // .StepBasedCollector) dispatching to a private per-step overload
+    // checkInsideBlocks(Vec3 from, Vec3 to, ..., int maxMovementIterations): int, which
+    // computes each step's box via `this.makeBoundingBox(to).deflate(1.0E-5F)` and walks
+    // blocks between `from`/`to` via BlockGetter.forEachBlockIntersectedBetween(...) --
+    // there's no direct `getBoundingBox()` call left to redirect at all. A faithful port
+    // would need to redirect `this.makeBoundingBox(to)` inside that private per-step
+    // overload instead, but the old null-box "cancel the whole check" escape hatch
+    // (onCheckInsideBlocks below) doesn't map cleanly onto the new int-returning,
+    // iteration-count-accounting step function (returning null there would NPE on
+    // `.deflate(...)`, and returning an arbitrary "cancelled" sentinel could desync the
+    // caller's `maxMovementIterations -=` bookkeeping) -- needs real design + in-game
+    // testing to get the cancellation semantics right, not a blind port. Disabled
+    // (require = 0) rather than crash-on-launch; cross-portal inside-block effects
+    // (fire/lava/powder-snow while straddling a portal) will use the entity's raw
+    // (un-adjusted-for-portal) position/box in the meantime -- a correctness-only
+    // regression near portals, not a crash, same tier as the other still-open
+    // rendering-pipeline items in docs/migration-26.1-plan.md.
     @Redirect(
         method = "Lnet/minecraft/world/entity/Entity;checkInsideBlocks()V",
         at = @At(
             value = "INVOKE",
             target = "Lnet/minecraft/world/entity/Entity;getBoundingBox()Lnet/minecraft/world/phys/AABB;"
-        )
+        ),
+        require = 0
     )
     private AABB redirectBoundingBoxInCheckingBlockCollision(Entity entity) {
         return ip_getActiveCollisionBox(entity.getBoundingBox());
@@ -170,7 +192,8 @@ public abstract class MixinEntity implements IEEntity, ImmPtlEntityExtension {
             shift = At.Shift.AFTER
         ),
         locals = LocalCapture.CAPTURE_FAILHARD,
-        cancellable = true
+        cancellable = true,
+        require = 0
     )
     private void onCheckInsideBlocks(CallbackInfo ci, AABB box) {
         if (box == null) {

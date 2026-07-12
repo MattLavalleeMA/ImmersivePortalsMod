@@ -74,16 +74,21 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     @Final
     private Minecraft minecraft;
     
-    @Shadow
-    private boolean panoramicMode;
+    // MC 26.1: GameRenderer.panoramicMode field removed entirely (confirmed via javap, no
+    // replacement found under any name) -- this @Shadow's only consumer,
+    // ip_setIsRenderingPanorama, was itself dead code (never called anywhere in this
+    // codebase), so removed both rather than chase a replacement for an unused hook.
     
     // TODO MC 26.1: GameRenderer.resetProjectionMatrix(Matrix4f) was removed entirely
     // (confirmed via javap) -- callers now use RenderSystem.backupProjectionMatrix()/
     // .restoreProjectionMatrix() instead (see MyGameRenderer.java). Removed this dead
     // @Shadow since nothing in this file used it and the target no longer exists.
     
-    @Shadow
-    protected abstract void bobView(PoseStack matrices, float f);
+    // MC 26.1: bobView(PoseStack, float) changed to bobView(CameraRenderState, PoseStack)
+    // (confirmed via javap) -- this @Shadow was never actually called from within this
+    // file though (only referenced by name in the @ModifyArg targets below, which don't
+    // need the descriptor to match), so just removed rather than updated, same as the
+    // resetProjectionMatrix @Shadow above.
     
     @Shadow @Final private static Logger LOGGER;
     
@@ -321,20 +326,19 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
         return projectionMatrix;
     }
     
-    @WrapOperation(
-        method = "renderLevel",
-        at = @At(
-            value = "INVOKE",
-            target = "Lorg/joml/Matrix4f;rotation(Lorg/joml/Quaternionfc;)Lorg/joml/Matrix4f;",
-            remap = false
-        )
-    )
-    private Matrix4f wrapCameraTransformation(
-        Matrix4f instance, Quaternionfc quat, Operation<Matrix4f> original
-    ) {
-        Matrix4f r = original.call(instance, quat);
-        return TransformationManager.processTransformation(mainCamera, r);
-    }
+    // MC 26.1: the `Matrix4f.rotation(Quaternionfc)` call this used to wrap no longer
+    // happens inside GameRenderer.renderLevel at all -- the view-rotation matrix is now
+    // computed (and cached) inside Camera.getViewRotationMatrix(Matrix4f) itself, called
+    // from Camera.setup()/extractRenderState() during the earlier "extract" phase, not
+    // from renderLevel (confirmed via decompiled source). Moved to MixinCamera.java,
+    // wrapping that method's own internal rotation(...) call instead -- see
+    // wrapCameraTransformation there. NOTE: Camera.getViewRotationMatrix() caches its
+    // result behind a dirty-flag check now (only recomputes when the camera's rotation
+    // actually changed), unlike the old renderLevel-inline call which ran fresh every
+    // single render. This could mean nested-portal-render transformations don't get
+    // reapplied as often as before if the outer camera's own rotation didn't change
+    // between renders -- flagged here for real in-game testing to confirm portal-view
+    // transformation still looks right frame-to-frame (see docs/migration-26.1-plan.md).
     
     @Override
     public void ip_setLightmapTextureManager(Lightmap manager) {
@@ -364,11 +368,6 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     @Override
     public void ip_setCamera(Camera camera_) {
         mainCamera = camera_;
-    }
-    
-    @Override
-    public void ip_setIsRenderingPanorama(boolean cond) {
-        panoramicMode = cond;
     }
     
 }

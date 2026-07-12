@@ -17,6 +17,4 @@ public interface IEGameRenderer {
     FogRenderer ip_getFogRenderer();
     
     void ip_setCamera(Camera camera);
-    
-    void ip_setIsRenderingPanorama(boolean cond);
 }

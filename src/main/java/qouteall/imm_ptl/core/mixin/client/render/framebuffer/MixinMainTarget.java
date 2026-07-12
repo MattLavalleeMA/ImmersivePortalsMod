@@ -24,13 +24,19 @@ public abstract class MixinMainTarget extends RenderTarget {
         throw new RuntimeException();
     }
     
+    // MC 26.1: same issue as MixinRenderTarget.java's modifyTexImage2D -- the whole
+    // depth-attachment allocation path was rewritten around GpuDevice.createTexture(...)
+    // and no longer calls GlStateManager._texImage2D at all. Disabled (require = 0)
+    // rather than crash-on-launch; see docs/migration-26.1-plan.md's "Portal rendering
+    // algorithm redesign" section for the real replacement plan.
     @ModifyArgs(
         method = "allocateDepthAttachment",
         at = @At(
             value = "INVOKE",
             target = "Lcom/mojang/blaze3d/platform/GlStateManager;_texImage2D(IIIIIIIILjava/nio/IntBuffer;)V",
             remap = false
-        )
+        ),
+        require = 0
     )
     private void modifyTexImage2D(Args args) {
         boolean isStencilBufferEnabled = ((IEFrameBuffer) this).ip_getIsStencilBufferEnabled();
@@ -77,13 +83,17 @@ public abstract class MixinMainTarget extends RenderTarget {
 //        }
 //    }
     
+    // MC 26.1: same issue -- createFrameBuffer no longer calls
+    // GlStateManager._glFramebufferTexture2D either. Disabled (require = 0) for the
+    // same reason.
     @ModifyArgs(
         method = "createFrameBuffer",
         at = @At(
             value = "INVOKE",
             target = "Lcom/mojang/blaze3d/platform/GlStateManager;_glFramebufferTexture2D(IIIII)V",
             remap = false
-        )
+        ),
+        require = 0
     )
     private void modifyFrameBufferTexture2d(Args args) {
         boolean isStencilBufferEnabled = ((IEFrameBuffer) this).ip_getIsStencilBufferEnabled();

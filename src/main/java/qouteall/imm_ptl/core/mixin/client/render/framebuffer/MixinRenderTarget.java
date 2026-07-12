@@ -46,13 +46,21 @@ public abstract class MixinRenderTarget implements IEFrameBuffer {
         isStencilBufferEnabled = false;
     }
     
+    // MC 26.1: RenderTarget.createBuffers no longer calls GlStateManager._texImage2D at
+    // all (confirmed at weave time -- 0 matching targets found; createBuffers was
+    // rewritten around GpuDevice.createTexture(...), see docs/migration-26.1-plan.md's
+    // "Portal rendering algorithm redesign" section for the full replacement plan,
+    // which needs a raw-LWJGL renderbuffer bolted onto the FBO instead of this
+    // texture-format-swap trick). Disabled (require = 0) rather than crash-on-launch;
+    // this whole mechanism is already tracked as needing a full redesign, not a rename.
     @ModifyArgs(
         method = "createBuffers",
         at = @At(
             value = "INVOKE",
             target = "Lcom/mojang/blaze3d/platform/GlStateManager;_texImage2D(IIIIIIIILjava/nio/IntBuffer;)V",
             remap = false
-        )
+        ),
+        require = 0
     )
     private void modifyTexImage2D(Args args) {
         if (Objects.equals(args.get(2), GL_DEPTH_COMPONENT)) {
@@ -99,13 +107,17 @@ public abstract class MixinRenderTarget implements IEFrameBuffer {
 //        }
 //    }
     
+    // MC 26.1: same as modifyTexImage2D above -- createBuffers no longer calls
+    // GlStateManager._glFramebufferTexture2D either. Disabled (require = 0) for the
+    // same reason.
     @ModifyArgs(
         method = "createBuffers",
         at = @At(
             value = "INVOKE",
             target = "Lcom/mojang/blaze3d/platform/GlStateManager;_glFramebufferTexture2D(IIIII)V",
             remap = false
-        )
+        ),
+        require = 0
     )
     private void modifyFrameBufferTexture2D(Args args) {
         if (Objects.equals(args.get(1), GL30C.GL_DEPTH_ATTACHMENT)) {

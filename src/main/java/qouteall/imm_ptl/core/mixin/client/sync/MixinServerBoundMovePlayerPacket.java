@@ -12,13 +12,16 @@ import qouteall.imm_ptl.core.ducks.IEPlayerMoveC2SPacket;
 
 @Mixin(ServerboundMovePlayerPacket.class)
 public class MixinServerBoundMovePlayerPacket {
+    // MC 26.1: ServerboundMovePlayerPacket's constructor gained a new
+    // `horizontalCollision` boolean param between `onGround` and `hasPos`/`hasRot`
+    // (confirmed via decompiled 26.1.2 source).
     @Inject(
         method = "<init>",
         at = @At("RETURN")
     )
     private void onConstruct(
         double x, double y, double z, float yaw, float pitch, boolean onGround,
-        boolean changePosition, boolean changeLook, CallbackInfo ci
+        boolean horizontalCollision, boolean changePosition, boolean changeLook, CallbackInfo ci
     ) {
         ResourceKey<Level> dimension = Minecraft.getInstance().player.level().dimension();
         ((IEPlayerMoveC2SPacket) this).ip_setPlayerDimension(dimension);

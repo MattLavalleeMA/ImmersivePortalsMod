@@ -61,12 +61,11 @@ public class MixinParticleEngine implements IEParticleManager {
     
     // a lava ember particle can generate a smoke particle during ticking
     // avoid generating the particle into the wrong dimension
-    @Inject(method = "Lnet/minecraft/client/particle/ParticleEngine;tickParticle(Lnet/minecraft/client/particle/Particle;)V", at = @At("HEAD"), cancellable = true)
-    private void onTickParticle(Particle particle, CallbackInfo ci) {
-        if (((IEParticle) particle).portal_getWorld() != Minecraft.getInstance().level) {
-            ci.cancel();
-        }
-    }
+    // MC 26.1: `ParticleEngine.tickParticle(Particle)` was moved to a new dedicated
+    // `ParticleGroup` class (confirmed via decompiled source: ParticleEngine.tick() now
+    // just calls `group.tickParticles()` per render-type group, which internally calls a
+    // private `ParticleGroup.tickParticle(Particle)` per particle) -- re-anchored onto
+    // that new class instead, see MixinParticleGroup.java.
     
     @Override
     public void ip_setWorld(ClientLevel world_) {

@@ -5,7 +5,9 @@ import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.creativetab.v1.FabricCreativeModeTab;
 import net.minecraft.network.chat.Component;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.Item;
@@ -31,11 +33,19 @@ import java.util.function.BiConsumer;
 
 public class PeripheralModMain {
     
+    // MC 26.1: BlockBehaviour's constructor now requires Properties.setId(ResourceKey)
+    // to have been called first (see PortalPlaceholderBlock.java for the full
+    // explanation) -- set here to the same identifier used later in registerBlocks.
     public static final Block portalHelperBlock =
-        new Block(BlockBehaviour.Properties.of().noOcclusion().isRedstoneConductor((a, b, c) -> false));
+        new Block(BlockBehaviour.Properties.of()
+            .setId(ResourceKey.create(Registries.BLOCK, McHelper.newResourceLocation("immersive_portals", "portal_helper")))
+            .noOcclusion().isRedstoneConductor((a, b, c) -> false));
     
     public static final BlockItem portalHelperBlockItem =
-        new PortalHelperItem(PeripheralModMain.portalHelperBlock, new Item.Properties());
+        new PortalHelperItem(
+            PeripheralModMain.portalHelperBlock,
+            new Item.Properties().setId(ResourceKey.create(Registries.ITEM, McHelper.newResourceLocation("immersive_portals", "portal_helper")))
+        );
     
     public static final CreativeModeTab TAB =
         FabricCreativeModeTab.builder()

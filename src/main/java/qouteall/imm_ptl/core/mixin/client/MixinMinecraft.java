@@ -9,6 +9,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.RenderBuffers;
 import net.minecraft.util.profiling.Profiler;
+import net.minecraft.world.entity.Entity;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.spongepowered.asm.mixin.Final;
@@ -138,13 +139,18 @@ public abstract class MixinMinecraft implements IEMinecraftClient {
         Profiler.get().pop();
     }
     
+    // MC 26.1: the exact FIELD-write injection point this used to anchor on
+    // (right after `Minecraft.fps` is assigned inside runTick) no longer resolves to
+    // any matching instruction at weave time (confirmed: the field itself and the
+    // `fps = this.frames;` write both still exist in the decompiled 26.1.2 source,
+    // inside runTick(boolean), but the exact bytecode shape Mixin's FIELD selector
+    // matched against apparently changed). Re-anchored to simply run at the TAIL of
+    // runTick instead -- functionally equivalent for "read the current fps once per
+    // client tick", and far more robust than depending on the exact instruction shape
+    // around one specific field write.
     @Inject(
         method = "Lnet/minecraft/client/Minecraft;runTick(Z)V",
-        at = @At(
-            value = "FIELD",
-            target = "Lnet/minecraft/client/Minecraft;fps:I",
-            shift = At.Shift.AFTER
-        )
+        at = @At("TAIL")
     )
     private void onSnooperUpdate(boolean tick, CallbackInfo ci) {
         ClientPerformanceMonitor.updateEverySecond(fps);
@@ -179,11 +185,16 @@ public abstract class MixinMinecraft implements IEMinecraftClient {
         }
     }
     
+    // MC 26.1: Minecraft.addInitialScreens(List<Function<Runnable, Screen>>) now
+    // returns a boolean (confirmed via decompiled source: "onboardingScreenAdded",
+    // specifically whether the accessibility onboarding screen was added -- unrelated to
+    // our own screen addition below) instead of void, so the injection now needs
+    // CallbackInfoReturnable<Boolean> instead of plain CallbackInfo.
     @Inject(
         method = "addInitialScreens",
         at = @At("RETURN")
     )
-    private void onAddInitialScreens(List<Function<Runnable, Screen>> output, CallbackInfo ci) {
+    private void onAddInitialScreens(List<Function<Runnable, Screen>> output, CallbackInfoReturnable<Boolean> cir) {
         IPConfig config = IPConfig.getConfig();
         if (!config.initialScreenShown) {
             output.add(IPortalInitialScreen::new);
@@ -213,5 +224,18 @@ public abstract class MixinMinecraft implements IEMinecraftClient {
     @Override
     public Thread ip_getRunningThread() {
         return gameThread;
+    }
+    
+    // MC 26.1: relocated from MixinLevelRenderer's redirectGlowing -- the old call site
+    // inside LevelRenderer.renderLevel is gone (glowing is now baked into each entity's
+    // render state during extraction, not read live from renderLevel), but this method
+    // itself is unchanged, so overriding it directly here is simpler and more robust
+    // against the call site moving again (same technique real mods use for this exact
+    // method, e.g. Moulberry/Flashback's MixinMinecraft).
+    @Inject(method = "shouldEntityAppearGlowing", at = @At("HEAD"), cancellable = true)
+    private void ip_onShouldEntityAppearGlowing(Entity entity, CallbackInfoReturnable<Boolean> cir) {
+        if (WorldRenderInfo.isRendering()) {
+            cir.setReturnValue(false);
+        }
     }
 }

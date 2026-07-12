@@ -14,7 +14,13 @@ import qouteall.imm_ptl.core.network.ImmPtlNetworkConfig;
 
 @Mixin(ClientboundPlayerPositionPacket.class)
 public class MixinClientboundPlayerPositionPacket {
-    @Inject(method = "<init>(Lnet/minecraft/network/FriendlyByteBuf;)V", at = @At("RETURN"))
+    // MC 26.1: ClientboundPlayerPositionPacket's FriendlyByteBuf-reading constructor is
+    // fully gone -- it's now a plain record deserialized via a declarative
+    // `StreamCodec.composite(...)`, not a constructor overload (confirmed via
+    // decompiled 26.1.2 source). Disabled (require = 0) for the same reason as the
+    // paired write-side hook (MixinPlayerPositionLookS2CPacket.java, common package) --
+    // see that file's comment for the full explanation.
+    @Inject(method = "<init>(Lnet/minecraft/network/FriendlyByteBuf;)V", at = @At("RETURN"), require = 0)
     private void onRead(FriendlyByteBuf buf, CallbackInfo ci) {
         if (ImmPtlNetworkConfig.doesServerHaveImmPtl()) {
             ResourceKey<Level> playerDimension = buf.readResourceKey(Registries.DIMENSION);

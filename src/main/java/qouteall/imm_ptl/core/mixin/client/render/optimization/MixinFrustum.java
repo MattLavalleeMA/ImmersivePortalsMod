@@ -1,8 +1,10 @@
 package qouteall.imm_ptl.core.mixin.client.render.optimization;
 
 import net.minecraft.client.renderer.culling.Frustum;
+import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
+import org.joml.Matrix4fc;
 import org.joml.Vector4f;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -73,34 +75,40 @@ public class MixinFrustum implements IEFrustum {
         portal_camZ = camZ;
     }
     
+    // MC 26.1: Frustum.cubeInFrustum(double,double,double,double,double,double) was
+    // replaced by cubeInFrustum(BoundingBox) (confirmed via javap -- BoundingBox uses int
+    // minX()/minY()/minZ()/maxX()/maxY()/maxZ() accessors, block-granularity rather than
+    // the old double AABB corners).
     @Inject(
         method = "cubeInFrustum",
         at = @At("HEAD"),
         cancellable = true
     )
     private void onCubeInFrustum(
-        double minX, double minY, double minZ, double maxX, double maxY, double maxZ,
+        BoundingBox box,
         CallbackInfoReturnable<Boolean> cir
     ) {
         if (ip_canDetermineInvisibleWithCamCoord(
-            (float) (minX - portal_camX),
-            (float) (minY - portal_camY),
-            (float) (minZ - portal_camZ),
-            (float) (maxX - portal_camX),
-            (float) (maxY - portal_camY),
-            (float) (maxZ - portal_camZ)
+            (float) (box.minX() - portal_camX),
+            (float) (box.minY() - portal_camY),
+            (float) (box.minZ() - portal_camZ),
+            (float) (box.maxX() - portal_camX),
+            (float) (box.maxY() - portal_camY),
+            (float) (box.maxZ() - portal_camZ)
         )) {
             cir.setReturnValue(false);
         }
     }
     
     // with scaling transformation, the view vector may be not unit-len
+    // MC 26.1: calculateFrustum's 1st param type changed from Matrix4f to the Matrix4fc
+    // interface (confirmed via the weave-time invalid-descriptor error).
     @Inject(
         method = "calculateFrustum",
         at = @At("RETURN")
     )
     private void onCalculateFrustumReturn(
-        Matrix4f matrix4f, Matrix4f matrix4f2, CallbackInfo ci
+        Matrix4fc matrix4f, Matrix4f matrix4f2, CallbackInfo ci
     ) {
         viewVector.normalize();
     }

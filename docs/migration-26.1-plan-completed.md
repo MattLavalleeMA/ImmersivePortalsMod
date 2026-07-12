@@ -1639,6 +1639,137 @@ Verified via `parse_compile_errors.py --run`: 0 errors. Not yet verified
 against a real game launch, same as every other Mixin string-target change
 this migration.
 
+## `MixinSodiumOcclusionCuller.java`'s portal cave-culling override re-anchored — implemented, weave-time unverified
+
+Originally investigated and left stubbed (see the prior write-up further down this
+file, kept for history) after fetching Sodium's `main`-branch source and concluding
+the new async/tree-based `CullTask` pipeline left "no single synchronous call site...
+to redirect." Re-examined while checking whether any "Remaining items" cluster item
+could be resolved with an exact-version-matching local reference instead of GitHub's
+`main` branch: Loom had already resolved the *exact* `sodium-mc26.1.2-0.9.1-fabric.jar`
+this project depends on into
+`~/.gradle/caches/modules-2/files-2.1/maven.modrinth/sodium/...` — decompiled with the
+same Vineflower jar Loom itself uses
+(`~/.gradle/caches/modules-2/files-2.1/org.vineflower/vineflower/*/vineflower-*.jar`).
+
+The real finding: the "no call site" framing was looking in the wrong place. The
+async scheduling happens at the *caller* of `OcclusionCuller.findVisible(...)`
+(`RenderSectionManager`'s `CullTask`), but the method's own body is unchanged in kind
+from the pre-redesign version in the one place that actually matters here —
+`findVisible` still computes a single seed point near the top of its own body:
+
+```java
+this.origin = viewport.getChunkCoord();
+this.inBoundsOrigin = this.origin;
+```
+
+— which is then fed into `init(...)`/`initWithinWorld(...)` to seed the BFS queue,
+exactly the same "single origin section, BFS out from there" shape the pre-redesign
+override targeted (just moved from a `frame`+`Visitor` pair into these two fields).
+Since Mixin transforms `OcclusionCuller`'s own bytecode, not its caller, this
+injection works identically regardless of which thread ends up calling
+`findVisible` — the async/background-thread scheduling that blocked the original
+"call site" framing is irrelevant to an in-method field injection.
+
+Fixed in `MixinSodiumOcclusionCuller.java`: `@Inject` at
+`@At(value = "FIELD", target = "...OcclusionCuller;inBoundsOrigin:...", opcode =
+PUTFIELD, shift = At.Shift.AFTER)` on `findVisible` (i.e. right after both origin
+fields are set, before `init`/`initWithinWorld` reads them), which — when
+`PortalRendering.shouldEnableSodiumCaveCulling()` is true — overwrites both
+`this.origin`/`this.inBoundsOrigin` with
+`PortalShape.getModifiedVisibleSectionIterationOrigin(renderingPortal, cameraPos)`
+(the same portal-shape-provided redirect target `VisibleSectionDiscovery`'s own
+bespoke BFS already uses for the non-Sodium path). `viewport.getTransform()` supplies
+the camera position (`CameraTransform.x/y/z`, confirmed `public final double` via
+`javap`). Compiles clean (0 errors) — like every other Mixin re-anchor this
+migration, still weave-time unverified pending a real game launch.
+
+## Vanilla terrain-visibility override, re-anchored against `SectionOcclusionGraph` — implemented, weave-time unverified
+
+Companion fix to the Sodium one above, for the path used when Sodium **isn't**
+installed — Sodium is an optional dependency, so its `OcclusionCuller` class isn't
+even loaded without it; vanilla's own `LevelRenderer`/`SectionOcclusionGraph` handles
+chunk visibility on that path instead, as a separate class with separate internals,
+so the Sodium fix has zero effect there. Needed its own equivalent redirect.
+
+Re-examined `VisibleSectionDiscovery.discoverVisibleSections` (the old bespoke BFS
+this item was about) and found it's actually **dead code, never called anywhere**
+(confirmed via full-repo search): `MyGameRenderer.switchAndRenderTheWorld` takes an
+*empty* list from `VisibleSectionDiscovery.takeList()` and hands it to the
+portal-rendered dimension's own `LevelRenderer` via `portal_setChunkInfoList(...)`,
+then just lets that `LevelRenderer`'s own natural `renderLevel` → `update(Camera)` →
+`cullTerrain` run and populate it. So the code already relies on vanilla's own (real,
+current) `cullTerrain`/`SectionOcclusionGraph`, not the bespoke BFS — and each
+portal-rendered dimension already gets its own persistent `LevelRenderer`/
+occlusion-graph instance via `DimensionRenderHelper`, so the "persistent per-frame
+state" concern the item was originally shelved for doesn't actually block reusing
+vanilla's algorithm the way it first appeared to. `client.smartCull` is already being
+toggled per `PortalRendering.shouldEnableSodiumCaveCulling()` around this call,
+consistent with that read.
+
+What was actually missing: read the real decompiled `SectionOcclusionGraph` source
+(sibling `-sources.jar`, same technique as the Sodium fix) and found
+`initializeQueueForFullUpdate(Camera, Queue<Node>)` seeds its BFS from a single
+`BlockPos cameraPosition = camera.blockPosition();` local — the same "one seed point"
+shape `PortalShape.getModifiedVisibleSectionIterationOrigin` already targets for the
+bespoke-BFS path. One real difference from Sodium's version: this full update is
+scheduled onto a background executor and **cached**
+(`SectionOcclusionGraph.currentGraph`, an `AtomicReference` only recomputed on
+`invalidate()`) rather than recomputed fresh every frame like Sodium's `findVisible` —
+so the fix deliberately only redirects this one seed-point local, not the camera
+position used elsewhere in the class for view-distance/frustum limiting or the
+separate position comparison in `cullTerrain` that decides *when* to invalidate/
+recompute, to avoid touching the graph's cache-invalidation timing.
+
+Implemented in `MixinSectionOcclusionGraph.java`: `@ModifyVariable(at = @At("STORE"),
+ordinal = 0)` on that `BlockPos` local, redirecting it to
+`renderingPortal.getPortalShape().getModifiedVisibleSectionIterationOrigin(renderingPortal,
+cameraPos).center()` whenever `PortalRendering.isRendering()` (registered in
+`imm_ptl.mixins.json` under `client.render.MixinSectionOcclusionGraph`). Compiles
+clean (0 errors) — like every Mixin re-anchor this migration, still weave-time
+unverified pending a real game launch.
+
+## Clip-plane shader-source injection, re-anchored onto `ShaderManager.loadShader` — implemented (source-injection half only), weave-time unverified
+
+The clip-plane redesign (`FrontClipping`/`IPGlobal.enableClippingMechanism`) can't
+reuse the raw-OpenGL-bypass technique planned for stencil masking (see "Portal
+rendering algorithm redesign" in the main plan): stencil testing is a pure
+fixed-function per-fragment test, unaffected by shader content, so a raw
+`glStencilFunc`/`glEnable` call around a draw works regardless of what shader ran.
+Clip planes are different — `gl_ClipDistance[0]` is a **per-vertex shader output**;
+`glEnable(GL_CLIP_DISTANCE0)` alone does nothing unless the bound vertex shader is
+itself compiled to write to `gl_ClipDistance[0]`, which none of vanilla's shaders do.
+This genuinely needs shader-source cooperation, not just a raw GL state call.
+
+Found that the GLSL-injection half already has a complete, version-independent
+implementation sitting unused in the codebase: `ShaderCodeTransformation`/
+`shader_transformation.yaml` (config-driven regex substitution inserting `uniform vec4
+iportal_ClippingEquation;` + `gl_ClipDistance[0] = dot(...)` into known vanilla
+vertex-shader source patterns) — already wired up for Sodium's own shader loader
+(`MixinSodiumShaderLoader`, `@WrapOperation` on `ShaderLoader.getShaderSource`) and
+Iris's (`MixinIrisTransformPatcher`), but never for plain vanilla shaders, since the
+old hook point (`ShaderInstance`/`Program`'s compile step) was removed and never
+re-anchored onto the new pipeline.
+
+Fixed in `MixinShaderManager.java`: a `@WrapOperation` on `ShaderManager.loadShader`'s
+`IOUtils.toString(Reader)` call (confirmed real via decompiled 26.1.2 source — this is
+exactly the call already flagged as the candidate hook point in the main plan),
+mirroring `MixinSodiumShaderLoader`'s existing working pattern. Registered in
+`imm_ptl.mixins.json` under `client.render.shader.MixinShaderManager`. Compiles clean
+(0 errors).
+
+**Still open, confirmed to be more than "just set the uniform value":** read the real
+decompiled `RenderPipeline`/`RenderPipelines` source and found
+`RenderPipeline.Builder.withUniform(String, UniformType)` — every vanilla pipeline
+explicitly declares its own uniform list in Java at registration time
+(`net.minecraft.client.renderer.RenderPipelines`), not just via GLSL text. So
+`iportal_ClippingEquation` also needs a matching `.withUniform(...)` declaration added
+to every affected pipeline (or a shared `Builder`/"snippet" they derive from, if one
+exists — not yet checked) before `RenderSystem.bindDefaultUniforms(RenderPass)` can
+bind a per-frame value to it. `FrontClipping
+.updateClippingEquationUniformForCurrentShader`/`.unsetClippingUniform` remain
+stubbed no-ops pending this; not attempted this round.
+
 ## `MixinSodiumOcclusionCuller.java` investigated — not a quick fix, real redesign needed
 
 Checked while surveying whether other stubbed/TODO items could be resolved via
@@ -1894,6 +2025,256 @@ doesn't validate — not yet confirmed against a real launch, though the `JAVA_2
 value is real-world-precedented on our exact MC version, so risk is low.
 
 Verified via `parse_compile_errors.py --run`: 0 errors.
+
+## `./gradlew runClient` weave-time crash-fixing pass, round 1 (~24 Mixin fixes) — implemented, launch still in progress
+
+With 0 compile errors reached, `./gradlew runClient` was attempted for the first
+time. Since `imm_ptl.mixins.json` has `"required": true` globally, Mixin aborts
+the whole launch on the **first** fatal apply failure it hits — so each launch
+attempt surfaces exactly one new weave-time issue (a rename/signature-change/
+removal invisible to `compileJava`), which then has to be fixed before the next
+attempt can surface the next one further along in startup. Established workflow
+per crash: read the crash log for the failing mixin class + target symbol, extract
+the real current class shape from the MC 26.1.2 sources jar
+(`.gradle/loom-cache/minecraftMaven/net/minecraft/minecraft-merged-*/26.1.2/*-sources.jar`,
+via `zipfile.ZipFile(jar).extract('path/To/Class.java', path='migration_tools/reports/decompiled_src2')`;
+Sodium/Iris jars similarly from `~/.gradle/caches/modules-2/files-2.1/maven.modrinth/{sodium,iris}/...`
+decompiled with Vineflower), then fix/retarget the mixin (or disable with
+`require = 0` + a comment if it needs genuine redesign, matching the
+already-stubbed rendering-pipeline items above), recompile, relaunch. Progress
+signal used throughout: the crash log location moves later each attempt
+(bootstrap → block registry init → mod entrypoints → packet handling → ...).
+
+Fixes applied so far, in the order the crashes were hit:
+
+- `MixinEntity.java` (collision): `checkInsideBlocks()` no-arg overload removed,
+  redesigned into a multi-step `Movement`-based system upstream. Disabled the
+  broken redirect/inject with `require = 0` — genuine redesign needed, not
+  attempted yet (same category as the already-stubbed rendering items).
+- `MixinMinecraft_B.java`: `pickBlock()` renamed to `pickBlockOrEntity()`.
+- `MixinLivingEntity_C.java`: `lerpX/Y/Z/Steps` fields gone, replaced by
+  `InterpolationHandler`. `LivingEntity.lerpTo(...)` gone, replaced by
+  `Entity.moveOrInterpolateTo(Vec3, float, float)` (now lives on `Entity`, not
+  `LivingEntity`) — retargeted the mixin to `Entity.class`.
+- `MixinMinecraft.java`: `addInitialScreens` now returns `boolean` (was `void`) →
+  switched the injector to `CallbackInfoReturnable<Boolean>`.
+- `MixinLevel.java`/`MixinServerLevel.java`: `Level.prepareWeather()` gone, moved
+  to a private `ServerLevel.prepareWeather(WeatherData)` → moved the
+  nether-rain-fog fix from `MixinLevel` to `MixinServerLevel`.
+- `MixinMinecraft.java` `onSnooperUpdate`: a `FIELD`-shift injection on the `fps`
+  write inside `runTick` stopped resolving → simplified to `@At("TAIL")`.
+- `MixinRenderTarget.java`/`MixinMainTarget.java`: stencil-buffer creation via
+  `GlStateManager._texImage2D`/`_glFramebufferTexture2D` inside
+  `createBuffers`/`allocateDepthAttachment`/`createFrameBuffer` — all gone (new
+  pipeline uses `GpuDevice.createTexture`). Disabled with `require = 0` (same
+  "portal rendering algorithm redesign" outstanding item as above).
+- `MixinItemEntity_P.java`: `ItemEntity.thrower`'s field type changed from `UUID`
+  to `EntityReference<Entity>` (field name unchanged).
+- `MixinAbstractClientPlayer.java`: `AbstractClientPlayer.clientLevel` field
+  removed entirely; retargeted the mixin to `Entity.class`, shadowing
+  `Entity.level` directly. Note: Mixin's `@Shadow` does **not** search up the
+  superclass chain — it must target the exact declaring class.
+- `MixinRenderSystem_Fog.java`: `RenderSystem.setShaderFogStart/End(float)`
+  removed entirely. Fog now flows through
+  `net.minecraft.client.renderer.fog.FogRenderer.setupFog(...)`, which returns a
+  `FogData` (public mutable fields `environmentalStart/End`,
+  `renderDistanceStart/End`). Retargeted to an `@Inject` at `RETURN` of
+  `setupFog`, mutating the returned `FogData`'s 4 fields directly.
+- `MixinServerLevel.java` `redirectIsEmpty`: the old `List.isEmpty()` check inside
+  `ServerLevel.tick(...)` is gone, replaced by
+  `ServerChunkCache.hasActiveTickets()` (a single boolean) — redirected that
+  instead.
+- `MixinContainer.java`: `Player.canInteractWithBlock(BlockPos, double)` renamed
+  to `isWithinBlockInteractionRange(BlockPos, double)` (same signature).
+- `MixinProjectile.java`: `Projectile.getOwner()` no longer calls
+  `ServerLevel.getEntity(UUID)` directly — it delegates to
+  `EntityReference.getEntity(EntityReference<Entity>, Level)`. Redirected that
+  static call instead, falling back to a cross-dimension UUID search via
+  `reference.getUUID()`.
+- `MixinClientLevel.java`: `ClientLevel`'s constructor lost a stale `Supplier`
+  param and gained a trailing `int seaLevel` param.
+- `MixinServerPlayerEntity_MA.java`: `changeDimension(TeleportTransition)` renamed
+  to `teleport(TeleportTransition)` (return type `ServerPlayer`, not `Entity`).
+  Also, `ServerPlayer.teleportTo(...)` gained `Set<Relative>` + `resetCamera`
+  params and now returns `boolean`.
+- `MixinAbstractMinecartEntity.java`: same `lerpTo` removal as
+  `MixinLivingEntity_C` — retargeted to `Entity.class`/`moveOrInterpolateTo`.
+- `MixinThrownEnderPearl.java`: an `@At` target string had a stale package
+  (`net.minecraft.world.entity.projectile.ThrownEnderpearl` instead of the real
+  `...projectile.throwableitemprojectile.ThrownEnderpearl`) — the import was
+  already correct, only the string literal was stale.
+- `MixinContainerOpenersCounter.java`: `getPlayersWithContainerOpen(Level,
+  BlockPos): List<Player>` gone, replaced by `getEntitiesWithContainerOpen(...):
+  List<ContainerUser>` (`Player` implements `ContainerUser`).
+- `MixinServerGamePacketListenerImpl_Redirect.java`: the `PacketSendListener`
+  class was removed entirely, replaced by Netty's own `ChannelFutureListener`
+  throughout `ServerCommonPacketListenerImpl`/`Connection`'s `send()` overloads.
+- `MixinMinecraftServer_DimStack_CVB.java` (peripheral): `setInitialSpawn` gained
+  a 5th `LevelLoadListener` param.
+- `MixinServerBoundMovePlayerPacket.java`: `ServerboundMovePlayerPacket`'s
+  constructor gained a new `horizontalCollision` boolean between `onGround` and
+  `hasPos`/`hasRot`.
+- `MixinPlayerPositionLookS2CPacket.java` + `MixinClientboundPlayerPositionPacket.java`:
+  `ClientboundPlayerPositionPacket` was rewritten from imperative
+  `read()`/`write(FriendlyByteBuf)` methods into a plain record + declarative
+  `StreamCodec.composite(...)`. With no write/read-constructor left to inject
+  into at all, both mixins were disabled (`require = 0`) — the real fix needs
+  wrapping the `STREAM_CODEC` itself (genuine redesign, deferred). Note: the
+  sibling C2S `ServerboundMovePlayerPacket.Pos/PosRot/Rot/StatusOnly` family was
+  **not** converted to `StreamCodec` (still has imperative
+  `read(FriendlyByteBuf)` static methods) — only the S2C
+  `ClientboundPlayerPositionPacket` needed disabling, not the whole family.
+- Block/Item registration: MC 26.1 requires
+  `BlockBehaviour.Properties.setId(ResourceKey<Block>)`/
+  `Item.Properties.setId(ResourceKey<Item>)` to be called **before** constructing
+  a custom `Block`/`Item` (the constructor now null-checks the id). Fixed for all
+  4 custom Block/Item instances in this repo — `PortalPlaceholderBlock`,
+  `PeripheralModMain.portalHelperBlock`, `PeripheralModMain.portalHelperBlockItem`,
+  `CommandStickItem.instance`, `PortalWandItem.instance` — each given a
+  `.setId(ResourceKey.create(Registries.BLOCK/ITEM, <same identifier used at
+  registration time>))`.
+- `MixinClientPacketListener.java` (multiple hooks): `PacketUtils
+  .ensureRunningOnSameThread`'s 3rd param changed from `BlockableEventLoop` to
+  `PacketProcessor` for client-side call sites (confirmed: `ClientPacketListener`
+  methods now call
+  `PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor())`).
+  Fixed in 4 separate `@At(INVOKE)` target strings in this one file. Also removed
+  a stale unused `@Shadow` for `applyLightData` (signature gained a trailing
+  boolean, but the shadow was unused in any active code path). Note:
+  `MixinServerGamePacketListenerImpl.java` (server-side) already correctly used
+  the other overload (`ServerLevel` 3rd param) — no fix needed there.
+
+**General lesson confirmed by this whole pass:** Mixin `@Shadow`/`@Inject`/
+`@Redirect` targets are **never** checked by `compileJava` — every one of the
+above was invisible until actual weave time. Expect more of the same pattern
+(rename, signature change, or full redesign) on each further launch attempt;
+the crash-log location moving later each time (bootstrap → block registry init →
+mod entrypoints → packet handling → ...) is the only reliable progress signal.
+
+**Status: still iterating, launch not yet achieved as of this writing.** Verified
+via `parse_compile_errors.py --run`: 0 compile errors after every fix above. See
+[migration-26.1-plan.md](migration-26.1-plan.md)'s "Next steps" for the current
+handoff state and exact next action.
+
+## `./gradlew runClient` weave-time crash-fixing pass, round 2 — client now reaches the main menu
+
+Continuation of round 1 above, same workflow (recompile → `runClient` → read crash
+→ fix → repeat, since `imm_ptl.mixins.json` aborts on the first fatal apply
+failure). This round finished off `GameRenderer`/`Minecraft`'s constructor-time
+mixin chain and got `./gradlew runClient` to a genuinely working main menu for the
+first time.
+
+Fixes applied, in order:
+
+- `MixinLevelRenderer.java`: removed dead `transparencyChain`/`deinitTransparency`
+  shadow (stubbed `portal_getTransparencyShader`/`portal_setTransparencyShader` to
+  no-ops); removed dead `cullingFrustum` shadow (stubbed
+  `portal_getFrustum`/`portal_setFrustum`); retargeted `renderSky` →
+  `addSkyPass(FrameGraphBuilder, CameraRenderState, GpuBufferSlice)` with a new
+  `onRenderSkyBegin` (HEAD, cancellable) plus new lambda-based face-culling hooks
+  `onBeforeSkyPassLambda`/`onAfterSkyPassLambda` targeting the exact synthetic
+  `lambda$addSkyPass$0` (confirmed `private static` via `javap`); removed the
+  obsolete `redirectGetEyePositionInSkyRendering`.
+- `MixinLevelRenderer_ForceMainThreadRebuild.java`: fixed an `@ModifyVariable`
+  ambiguity in `compileSections` caused by `Options.prioritizeChunkUpdates()`
+  changing from `boolean` to a `PrioritizeChunkUpdates` enum (creating 2 in-scope
+  booleans) — re-anchored with an explicit `ordinal` at a `setWasPreviouslyEmpty`
+  INVOKE point.
+- `MixinMinecraft.java`: added `ip_onShouldEntityAppearGlowing` (`@Inject` HEAD
+  cancellable on the new `Minecraft.shouldEntityAppearGlowing`), relocated from a
+  dead `MixinLevelRenderer.redirectGlowing` (the method moved off
+  `LevelRenderer` onto `Minecraft` itself).
+- `MixinSodiumWorldRenderer.java` (Sodium compat): fixed `setupTerrain`'s real
+  signature — `(Camera, Viewport, FogParameters, boolean, boolean, Matrix4f)`.
+  Confirmed empirically that **`remap = false` (Sodium/third-party) targets
+  require the full exact parameter list** in the `@Inject` handler — trailing
+  params can't be dropped the way they sometimes can for vanilla targets.
+- `MixinSectionBufferBuilderPack.java`: retargeted a stale intermediary lambda
+  name `method_60896` → the real `lambda$new$0`; changed the redirect from
+  `RenderType.bufferSize()` to `ChunkSectionLayer.bufferSize()`.
+- `MixinMultiBufferSourceBufferSource.java`: fixed a stale `@Inject` descriptor
+  string literal — `Lnet/minecraft/client/renderer/RenderType;` was missing the
+  `rendertype` package segment added by an earlier bulk package-rename (bulk
+  renames don't touch annotation string literals, only real Java
+  imports/usages).
+- `MixinParticleEngine.java`/`MixinParticleGroup.java` (new file):
+  `ParticleEngine.tickParticle(Particle)` moved to a new dedicated
+  `ParticleGroup<P>` class — relocated the whole override there and registered
+  the new mixin in `imm_ptl.mixins.json`.
+- `MixinGameRenderer.java`: removed dead `bobView(PoseStack,float)` shadow (real
+  signature now `(CameraRenderState,PoseStack)`, unused); removed dead
+  `panoramicMode` field shadow + its only consumer
+  `ip_setIsRenderingPanorama` (also removed from `IEGameRenderer.java`); moved
+  `wrapCameraTransformation` (`@WrapOperation` on `Matrix4f.rotation
+  (Quaternionfc)`) out to `MixinCamera.java` since that call moved from
+  `GameRenderer.renderLevel` to `Camera.getViewRotationMatrix`.
+- `MixinGameRenderer_Isometric.java`: retargeted from the removed
+  `GameRenderer.getProjectionMatrix(double)` to `@ModifyVariable(method=
+  "renderLevel", at=@At("STORE"), ordinal=0)` on the local `Matrix4f
+  projectionMatrix` (the value that method used to return got inlined into a
+  local).
+- `MixinGameRenderer_B.java`: `pick(float)` moved off `GameRenderer` onto
+  `Minecraft` entirely — retargeted the whole `@Mixin` to `Minecraft.class`.
+- `MixinCamera.java`: added `wrapCameraTransformation` (relocated from
+  `MixinGameRenderer`, see above); removed a dead `getEntity()` shadow (real
+  method renamed to `entity()`, unused in this file).
+- `MixinFrustum.java`: fixed `cubeInFrustum` (6 `double` params → a single
+  `BoundingBox` object param); fixed `calculateFrustum`'s first param type
+  `Matrix4f` → `Matrix4fc`.
+- `MixinScreenEffectRenderer.java`: `renderTex(TextureAtlasSprite, PoseStack)`
+  gained a trailing `MultiBufferSource` param. **Confirmed here that `@Inject`
+  handlers can NOT reliably drop trailing target-method params even for
+  `remap = true` vanilla targets** (an assumption from earlier in this pass
+  turned out to be wrong/based on an unrelated lambda case) — the handler now
+  declares the full real 3-param signature.
+- `MixinDebugScreenOverlay.java`: `getSystemInformation(): List<String>` (which
+  used to build+return the right-side debug-text column) no longer exists.
+  MC 26.1 builds both `leftLines`/`rightLines` in `extractRenderState` and
+  mutates each in-place via `extractLines(GuiGraphicsExtractor, List<String>
+  list, boolean isLeft)` (confirmed via decompile: `extractLines(graphics,
+  leftLines, true); extractLines(graphics, rightLines, false);`). Rewrote the
+  hook as an `@Inject` on `extractLines` at `RETURN`, only acting when
+  `isLeft == false`.
+- `MixinFabricInvalidateRenderStateCallback.java` (Fabric API event
+  pseudo-mixin): `EventFactory.createArrayBacked`'s synthetic invoker lambda
+  shifted from `lambda$static$0` to `lambda$static$1` (a new `lambda$static$0`
+  now exists that returns the merged `InvalidateRenderStateCallback` instance
+  itself, confirmed via `javap`) — retargeted the `@Inject`'s `method` string.
+- `MixinSplashManager_CVB.java`: the shadowed `splashes` field is now populated
+  with an **immutable** `List` — calling `.remove()`/`.add()` on it threw
+  `UnsupportedOperationException`. This is a genuinely important find: the
+  exception was silently caught by Minecraft's own resource-pack-reload error
+  handler (logged only as "Caught error loading resourcepacks, removing all
+  selected resourcepacks", no Mixin-apply error at all) and was the actual root
+  cause of a **fully black/blank, but responsive, title screen** on first
+  launch after round 1 finished — not a rendering bug. Fixed by copying into a
+  `new ArrayList<>(splashes)`, mutating that, then writing it back to the
+  `@Shadow @Final` field (requires adding `@Mutable`).
+- `MixinCreateWorldScreen_CVB.java` (peripheral, deferred crash — only surfaces
+  when actually clicking Singleplayer → Create New World, since
+  `CreateWorldScreen` is lazily classloaded): its constructor gained a trailing
+  `CreateWorldCallback` param and changed its 2nd param from `Screen` to
+  `Runnable` — updated the `@Inject` handler's signature to match exactly
+  (confirmed via `javap`).
+
+**New lesson from this round:** reaching a clean main-menu launch does **not**
+mean every Mixin is fixed — classes that are only classloaded lazily (any
+per-button `Screen` subclass, event-factory lambdas triggered on first fire,
+etc.) only get weave-time-validated when actually exercised at runtime. Expect
+further crashes of this same "Invalid descriptor"/removed-member shape to surface
+one at a time as more of the game is actually clicked through/played, exactly
+like round 1's bootstrap-order crashes did — just gated on manual/UI feature
+usage instead of pure startup order. A blank/black screen with **no** logged
+Mixin-apply error is also a signal worth checking for a caught-and-swallowed
+exception in an unrelated subsystem (see the `SplashManager` case above), not
+just assuming a rendering-mixin bug.
+
+**Status: `./gradlew runClient` now reaches a fully working, clickable main menu.**
+Verified via `parse_compile_errors.py --run`: 0 compile errors after every fix
+above. Further deferred/lazy-loaded mixin crashes are expected and being fixed as
+they're discovered through manual play-testing — see
+[migration-26.1-plan.md](migration-26.1-plan.md)'s "Next steps" for current
+handoff state.
 
 
 

@@ -14,11 +14,17 @@ import qouteall.q_misc_util.Helper;
 
 @Mixin(ThrownEnderpearl.class)
 public class MixinThrownEnderPearl {
+    // MC 26.1: ThrownEnderpearl moved package to
+    // net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl
+    // (confirmed via decompiled 26.1.2 source) -- this @At target string was still
+    // pointing at the old net.minecraft.world.entity.projectile.ThrownEnderpearl
+    // package, so it silently matched nothing (0 targets) even though the import above
+    // was already updated.
     @Inject(
         method = "onHit",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/world/entity/projectile/ThrownEnderpearl;discard()V"
+            target = "Lnet/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl;discard()V"
         )
     )
     private void onOnHitDiscard(HitResult result, CallbackInfo ci) {

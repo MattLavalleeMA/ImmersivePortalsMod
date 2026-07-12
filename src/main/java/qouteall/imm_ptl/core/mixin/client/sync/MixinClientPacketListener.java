@@ -57,8 +57,10 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
     @Shadow
     public abstract void handleSetEntityPassengersPacket(ClientboundSetPassengersPacket entityPassengersSetS2CPacket_1);
     
-    @Shadow
-    protected abstract void applyLightData(int x, int z, ClientboundLightUpdatePacketData data);
+    // MC 26.1: applyLightData gained a trailing `boolean scheduleRebuild` param
+    // (confirmed via decompiled 26.1.2 source) -- this @Shadow was unused anywhere in
+    // active code (only referenced from a commented-out block below), so removed
+    // rather than updated.
     
     @Shadow
     @Final
@@ -85,11 +87,15 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         isReProcessingPassengerPacket = false;
     }
     
+    // MC 26.1: PacketUtils.ensureRunningOnSameThread's 3rd param changed from
+    // BlockableEventLoop to PacketProcessor (confirmed via decompiled 26.1.2 source --
+    // handleMovePlayer now calls `PacketUtils.ensureRunningOnSameThread(packet, this,
+    // this.minecraft.packetProcessor())`).
     @Inject(
         method = "Lnet/minecraft/client/multiplayer/ClientPacketListener;handleMovePlayer(Lnet/minecraft/network/protocol/game/ClientboundPlayerPositionPacket;)V",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/network/protocol/PacketUtils;ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;Lnet/minecraft/util/thread/BlockableEventLoop;)V",
+            target = "Lnet/minecraft/network/protocol/PacketUtils;ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;Lnet/minecraft/network/PacketProcessor;)V",
             shift = At.Shift.AFTER
         )
     )
@@ -132,11 +138,13 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
     
     private boolean isReProcessingPassengerPacket;
     
+    // MC 26.1: same PacketUtils.ensureRunningOnSameThread signature change as
+    // onProcessingPositionPacket above.
     @Inject(
         method = "Lnet/minecraft/client/multiplayer/ClientPacketListener;handleSetEntityPassengersPacket(Lnet/minecraft/network/protocol/game/ClientboundSetPassengersPacket;)V",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/network/protocol/PacketUtils;ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;Lnet/minecraft/util/thread/BlockableEventLoop;)V",
+            target = "Lnet/minecraft/network/protocol/PacketUtils;ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;Lnet/minecraft/network/PacketProcessor;)V",
             shift = At.Shift.AFTER
         ),
         cancellable = true
@@ -222,7 +230,7 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         method = "handleAddEntity",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/network/protocol/PacketUtils;ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;Lnet/minecraft/util/thread/BlockableEventLoop;)V",
+            target = "Lnet/minecraft/network/protocol/PacketUtils;ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;Lnet/minecraft/network/PacketProcessor;)V",
             shift = At.Shift.AFTER
         ),
         cancellable = true
@@ -272,7 +280,7 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         method = "handleLevelChunkWithLight",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/network/protocol/PacketUtils;ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;Lnet/minecraft/util/thread/BlockableEventLoop;)V",
+            target = "Lnet/minecraft/network/protocol/PacketUtils;ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;Lnet/minecraft/network/PacketProcessor;)V",
             shift = At.Shift.AFTER
         )
     )
@@ -289,7 +297,7 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         method = "handleForgetLevelChunk",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/network/protocol/PacketUtils;ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;Lnet/minecraft/util/thread/BlockableEventLoop;)V",
+            target = "Lnet/minecraft/network/protocol/PacketUtils;ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;Lnet/minecraft/network/PacketProcessor;)V",
             shift = At.Shift.AFTER
         )
     )
