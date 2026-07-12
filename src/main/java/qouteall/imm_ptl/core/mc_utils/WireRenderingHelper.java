@@ -31,13 +31,26 @@ import java.util.function.IntSupplier;
 public class WireRenderingHelper {
     
     /**
-     * TODO MC 26.1: {@code LevelRenderer.renderLineBox(...)} was removed entirely (not
-     * renamed) -- debug wireframe drawing appears to have moved to a new
-     * {@code net.minecraft.gizmos} package ({@code LineGizmo}), a genuinely new debug
-     * -drawing API not yet investigated. Reimplemented directly here instead, since this
+     * MC 26.1: {@code LevelRenderer.renderLineBox(...)} was removed entirely (not
+     * renamed) -- debug wireframe drawing moved to a new declarative
+     * {@code net.minecraft.gizmos} API ({@code Gizmos.cuboid/circle/line/arrow/rect/
+     * point/...}, collected via a thread-local {@code GizmoCollector} and drawn later
+     * by {@code LevelRenderer}'s own gizmo-submission step -- see
+     * {@code LevelRenderer$FinalizedGizmos}/{@code DrawableGizmoPrimitives}).
+     * <p>
+     * Investigated and deliberately NOT adopted here: the Gizmo API only exposes
+     * axis-aligned primitives with no rotation support (confirmed via decompiled
+     * {@code Gizmos.java}/{@code CuboidGizmo.java}), but this class's own
+     * {@link #renderSmallCubeFrame} draws an animated *rotating* highlight cube — not
+     * expressible via {@code Gizmos.cuboid(AABB, GizmoStyle)} at all. The Gizmo API is
+     * also collected during the CPU-only {@code LevelRenderer.extractLevel(...)} phase
+     * (no {@link PoseStack}/{@link VertexConsumer} available there), whereas this
+     * helper needs precise immediate-mode control over an already-transformed
+     * {@link PoseStack} to draw correctly when rendering through a mirrored/rotated
+     * portal view into another dimension — something the single-main-camera Gizmo
+     * pipeline has no hook for at all. Reimplemented directly here instead, since this
      * is simple, self-contained box-edge geometry (12 line segments) using the same
-     * plain {@link VertexConsumer} calls already used elsewhere in this file -- avoids
-     * depending on the unresearched Gizmo API for such a small amount of logic.
+     * plain {@link VertexConsumer} calls already used elsewhere in this file.
      */
     private static void renderLineBox(
         PoseStack matrixStack, VertexConsumer vertexConsumer,

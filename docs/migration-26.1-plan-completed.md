@@ -1255,3 +1255,239 @@ the pre-existing, unrelated `GravityChangerInterface.java` cluster):
 project-wide count is 25 errors / 7 symbols, **100% confined to
 `GravityChangerInterface.java`** (verified by listing distinct files across all
 remaining error groups) — DimLib itself has zero compile errors of its own.
+
+## `net.minecraft.gizmos` debug-drawing system — investigated, not adopted
+
+Full research via decompiled source (`Gizmos.java`, `Gizmo.java`,
+`GizmoCollector.java`, `CuboidGizmo.java`, and `LevelRenderer.java`'s
+`extractLevel(...)`/`emitGizmos(...)` call site), following up on the
+`WireRenderingHelper.renderLineBox` stub-with-a-`TODO` left earlier in this
+migration (see "Small mechanical fixes" above). Confirmed the new declarative
+`net.minecraft.gizmos` API (`Gizmos.cuboid`/`circle`/`line`/`arrow`/`rect`/`point`/
+`billboardText...`, each building a `Gizmo` object collected into a thread-local
+`GizmoCollector` via `Gizmos.addGizmo(...)`, later drawn by `LevelRenderer`'s own
+gizmo-submission step — see `LevelRenderer$FinalizedGizmos`/
+`client.renderer.gizmos.DrawableGizmoPrimitives`) is vanilla's wholesale
+replacement for the old immediate-mode debug-drawing helpers
+(`LevelRenderer.renderLineBox(...)` and `DebugRenderer.render(PoseStack,
+MultiBufferSource.BufferSource, double, double, double)`, both fully removed, not
+renamed).
+
+**Decision: not adopted for this mod's own debug-wireframe drawing**
+(`WireRenderingHelper`'s box-edge helper, and the portal wand's marker overlays in
+`ClientPortalWandPortalCreation`/`Drag`/`Copy`), for two confirmed, concrete
+reasons:
+- The Gizmo API only exposes **axis-aligned** primitives (`Gizmos.cuboid(AABB,
+  GizmoStyle)` takes a plain `AABB`, no rotation parameter anywhere on
+  `CuboidGizmo`/`GizmoStyle`) — but `WireRenderingHelper.renderSmallCubeFrame`
+  draws an animated *rotating* highlight cube (a per-frame smoothly-interpolated
+  `DQuaternion` rotation applied via `matrixStack.mulPose(...)`), which the Gizmo
+  API cannot express at all.
+- Gizmo collection happens during `LevelRenderer.extractLevel(...)`, a CPU-only
+  data-extraction phase with **no `PoseStack`/`VertexConsumer` available at all**
+  (`DebugRenderer.emitGizmos(Frustum, double, double, double, float)` only takes a
+  frustum, camera position, and partial tick). This mod's wireframe drawing needs
+  precise immediate-mode control over an *already-transformed* `PoseStack` — the
+  transform in place when rendering through a mirrored/rotated portal view into
+  another dimension — which the single-main-camera, world-space-only Gizmo
+  pipeline has no hook for at all.
+
+`WireRenderingHelper.renderLineBox`'s existing hand-rolled reimplementation
+(confirmed correct, kept as-is) and the portal wand's own custom
+`PoseStack`+`VertexConsumer`-based drawing remain the right approach.
+
+**A real, previously-undiscovered weave-time-crash bug was found in the course of
+this investigation and fixed**: `MixinDebugRenderer.java`
+(`peripheral.mixin.client.portal_wand` package) had an `@Inject` targeting
+`DebugRenderer.render(PoseStack, MultiBufferSource.BufferSource, double, double,
+double)` to hook the portal wand's marker rendering in — that method is **fully
+removed** (confirmed via `inspect_class.py`: `DebugRenderer`'s only public methods
+left are `refreshRendererList()`, `emitGizmos(Frustum, double, double, double,
+float)`, and the static `getTargetedEntity(...)`). Since Mixin `@Inject` is
+`require`d by default, targeting a nonexistent method would have **hard-crashed
+Mixin weaving at actual game launch** (not merely a silent no-op or a
+`compileJava`-visible error — Mixin string-based `method=` targets are never
+checked by `compileJava`, only at weave time, per the pattern established
+throughout this migration). The real `PoseStack`+`MultiBufferSource`+
+camera-position render call site now lives inside `LevelRenderer.addMainPass`'s
+captured `FramePass` lambda (confirmed via decompiled source) — the same
+synthetic-lambda-method re-anchoring problem already tracked for
+`MixinLevelRenderer.java`'s ~8 disabled hooks, not a stable, directly-injectable
+named method. `MixinDebugRenderer.java` was emptied (same precedent as
+`MixinLevelRenderer_BeforeIris.java`) pending a real game launch to re-anchor
+against the actual lambda method; `PortalWandItem.clientRender`/
+`ClientPortalWandPortalCreation`/`Drag`/`Copy.render(...)`'s actual marker-drawing
+logic was left completely untouched and is ready to reconnect once a hook is
+found — confirmed (via `grep`) that `MixinDebugRenderer` was their only caller, so
+nothing else needed updating. Verified via `parse_compile_errors.py --run`:
+project-wide count unchanged at 25/7 (this was never a compile error, only a
+latent weave-time crash).
+
+## GravityChanger support dropped (stubbed out) — done
+
+**Decision: this mod will not support GravityChanger going forward.** Upstream
+(`com.github.qouteall/GravityChanger`) is archived (read-only since Apr 2026) and
+its last release only targets mc1.20.4 — there is no compatible API to bind
+against for 26.1.2, and no fork/migration was planned (see the now-removed
+"Blocking / external dependency issues" entry in the main plan doc). Rather than
+fencing the file off from compilation with a guard, the real-API-bound
+implementation was deleted outright:
+
+- `GravityChangerInterface.java`: removed the `OnGravityChangerPresent` subclass
+  (which called into `gravity_changer.api.GravityChangerAPI`/
+  `gravity_changer.util.RotationUtil`) and its now-unused imports
+  (`gravity_changer.*`, `net.minecraft.client.Minecraft`,
+  `org.apache.commons.lang3.Validate`). The class now only ever has its existing
+  no-op default `Invoker` (gravity always `Direction.DOWN`, eye offset defaults
+  to `entity.getEyeHeight()`, world-space velocity/vector transforms are
+  identity, `setClientPlayerGravityDirection` just warns via the existing
+  `imm_ptl.missing_gravity_changer` chat message/lang key, which was kept since
+  it's still reachable).
+- `IPModEntry.java`: removed the `FabricLoader.getInstance().isModLoaded(
+  "gravity_changer_q")` branch that swapped in
+  `GravityChangerInterface.OnGravityChangerPresent` at mod-init time.
+- `build.gradle`: removed the `compileOnly("com.github.qouteall:GravityChanger:...")`
+  declaration and the `enable_gravity_changer`-gated `localRuntime(...)` block.
+- `gradle.properties`: removed the now-unused `gravity_changer_version` and
+  `enable_gravity_changer` properties (updated the comment above `sodium_path`/
+  `iris_path` to note the permanent stub instead).
+
+This was the **only** remaining compile-error cluster (25 errors / 7 distinct
+symbols, all in `GravityChangerInterface.java`). Verified via
+`parse_compile_errors.py --run`: **0 errors / 0 symbols** — the project now
+compiles clean end-to-end for the first time this migration.
+
+## `MixinFogRenderer.java`'s cross-dimension fog color swap, redesigned — done
+
+**The last remaining weave-time-only issue is fixed.** `FogRenderer` (confirmed
+via decompiled source and `javap --private`) was rewritten from a bag of static
+per-dimension fields (`fogRed`/`fogGreen`/`fogBlue`/`targetBiomeFog`/
+`previousBiomeFog`/`biomeChangedTime`) into a plain instance whose `setupFog(
+Camera, int, DeltaTracker, float, ClientLevel)` is a **pure function** of its
+arguments — the class's only remaining instance fields are two GPU buffers
+(`emptyBuffer`/`regularBuffer`), there is no mutable per-dimension color or
+biome-transition state left to track at all. This means the old
+`MixinFogRenderer.java` (in `multiworld_awareness`), which shadowed those 6
+now-nonexistent static fields to swap them per-dimension via a generic
+`StaticFieldsSwappingManager<Context>` helper, was both weave-broken (the
+`@Shadow`ed fields don't exist — would have hard-crashed Mixin weaving at game
+launch) *and* fundamentally obsolete as a design, since there's no longer any
+static state to swap in the first place.
+
+**Fix: removed the mixin and swapping mechanism entirely, replaced with direct
+`setupFog`-based computation.**
+
+- Deleted `MixinFogRenderer.java` outright (not just emptied — unlike
+  `MixinDebugRenderer.java`'s temporary emptying pending re-anchoring, this
+  mixin's entire premise no longer applies, so there was nothing to preserve)
+  and removed its entry from `imm_ptl.mixins.json`.
+- Deleted `StaticFieldsSwappingManager.java` (the generic per-dimension
+  static-field-swap helper) since `FogRendererContext` was its only consumer
+  and no longer needs it.
+- Rewrote `FogRendererContext.java` down to two static methods, both computing
+  fresh `FogData` via `setupFog` instead of reading/writing swapped state:
+  - `getFogColorOf(ClientLevel, Vec3)` — cross-dimension query (used by
+    portal-teleportation code), simplified since `setupFog` takes the target
+    `ClientLevel` directly as a parameter — no longer needs to temporarily
+    swap `client.level`/push-pop a swapping-manager context at all, since
+    `computeFogColor`/`getFogType`/the `FogEnvironment`s all read only from
+    their passed-in `Camera`/`ClientLevel` params (confirmed via decompiled
+    source), never from `Minecraft.getInstance().level` or any other ambient
+    static state.
+  - `getCurrentFogColor()` (replaces the old `Supplier<Vec3>` field of the same
+    name) — recomputes fog fresh via `setupFog`, using the shared
+    `GameRenderer`'s own `FogRenderer` instance (via the existing
+    `IEGameRenderer.ip_getFogRenderer()` duck) and whatever `client.gameRenderer
+    .getMainCamera()`/`client.level` currently are. Used by
+    `RendererUsingStencil.java`'s `replaceFrameBufferClearing()` to pick the
+    fog color for the full-screen triangle drawn in place of a framebuffer
+    clear — this is now self-contained and correct regardless of dimension,
+    since it always reflects whatever the *actual current* render
+    target is at call time.
+  - Removed `init()`/`update()`/`onPlayerTeleport(...)` (all existed only to
+    manage the now-deleted swapping manager's per-dimension context map) and
+    their call sites: `RenderStates.updatePreRenderInfo(...)`'s
+    `FogRendererContext.update()` call, and
+    `ClientTeleportationManager.changePlayerDimension(...)`'s
+    `FogRendererContext.onPlayerTeleport(from, to)` call (with the now-unused
+    `FogRendererContext` import removed from that file too).
+
+**The actual render-time fog switch, in `MyGameRenderer.switchAndRenderTheWorld`
+— confirmed via decompiled source, not a guess.** Tracing the real call chain
+(`GameRenderer.render()` → private `extractCamera(...)` → `this.fogRenderer
+.setupFog(this.mainCamera, ..., this.minecraft.level)`, storing the result in
+`this.gameRenderState.levelRenderState.cameraRenderState.fogData`, a **public,
+mutable field on a publicly-reachable object graph** (`GameRenderer
+.getGameRenderState()` is a real public method) confirmed this is computed
+**once per real frame**, using the outer/main dimension's camera+level, and is
+never recomputed by `GameRenderer.renderLevel(DeltaTracker)` itself (the method
+this mod calls directly to render nested/portal dimension content — it only
+re-**uploads** whatever `cameraState.fogData` currently holds via
+`this.fogRenderer.updateBuffer(cameraState.fogData)`, it doesn't recompute it).
+Left untouched, portal-rendered dimensions would silently keep using the
+*outer* world's stale fog data for their own terrain/sky/weather passes.
+Fixed by mirroring `extractCamera`'s exact real logic at the world-switch point:
+saves `cameraRenderState.fogType`/`.fogData` before switching, installs a fresh
+`setupFog(...)`-computed replacement for the new camera/dimension (after giving
+the fresh scratch `Camera` a real position/focused-entity via the same
+`portal_setPos`/`portal_setFocusedEntity` pattern `FogRendererContext
+.getFogColorOf` already used), then restores the saved values when switching
+back to the outer world. No new Mixin/duck accessor was needed at all —
+`GameRenderer.getGameRenderState()`, `LevelRenderState.cameraRenderState`, and
+`CameraRenderState.fogType`/`.fogData` are all already public fields/methods on
+vanilla's own classes (confirmed via `javap --private` on all three).
+
+**Not fully verified by real gameplay yet** — this is a source-confirmed,
+faithful translation of the real vanilla logic (not a stub or a guess), but
+like the rest of the portal-rendering-pipeline redesign work, actually seeing
+correct fog color through a portal into another dimension needs a real game
+launch to confirm end-to-end (tracked under "Next steps" in the main plan doc).
+Verified via `parse_compile_errors.py --run`: **0 errors / 0 symbols**, no
+regressions — this was never a compile error to begin with, only a
+weave-time-crash risk that's now fully eliminated.
+
+## `MixinFogRenderer_A_CVB.java`'s weave-time-broken targets, fixed — done
+
+**Found while investigating the `MixinFogRenderer.java` redesign above, and
+fixed in the same pass** (not previously tracked anywhere in either migration
+doc — a genuinely new discovery, not a re-surfacing of a known item).
+`MixinFogRenderer_A_CVB.java` (`peripheral.mixin.client.alternate_dimension`
+package — overrides the void-darkness fog falloff to avoid alternate
+dimensions looking artificially dark when viewed from the overworld through a
+portal) had **two** stale Mixin string targets pointing at APIs that no longer
+exist at all:
+
+- `method = "...FogRenderer;setupColor(Camera,float,ClientLevel,int,float)..."`
+  — this static method was removed entirely (see the `MixinFogRenderer.java`
+  section above: replaced by the instance method `setupFog(Camera, int,
+  DeltaTracker, float, ClientLevel)`).
+- `at.target = "...Camera;getPosition()..."` — renamed to `Camera.position()`
+  (confirmed via `javap`).
+
+Since Mixin `@Redirect` is `require`d by default just like `@Inject`, both
+stale strings would have **hard-crashed Mixin weaving at game launch** — the
+same failure mode as `MixinFogRenderer.java`/`MixinDebugRenderer.java`'s
+previously-found issues, just not previously noticed since nothing had gone
+looking at this file specifically until now.
+
+**Fix: retargeted both strings to their real replacements, no other changes
+needed.** Traced the actual color/darkness computation in `setupFog`'s new
+decompiled source to a private helper, `computeFogColor(Camera, float,
+ClientLevel, int, float, Vector4f)`, confirmed (via the real decompiled body)
+to contain **exactly one** call to `camera.position()` — precisely the
+void-darkness falloff read (`(voidDarknessOnsetRange + level.getMinY() -
+camera.position().y) / voidDarknessOnsetRange`) this mixin exists to override,
+with no other camera-position reads inside that method that could conflict.
+Retargeted `method` to `FogRenderer.computeFogColor(...)`'s full descriptor and
+`at.target` to `Camera.position()`. The mixin's own handler body
+(`redirectCameraGetPos`) needed **no changes at all** — it already called
+`camera.position()` (the new name) internally; only the two Mixin annotation
+strings pointing at the old, now-removed API surface were stale. Verified via
+`parse_compile_errors.py --run`: **0 errors / 0 symbols**, no regressions —
+like its sibling fix above, this was never a compile error (Mixin string
+targets aren't compile-checked), only a weave-time-crash risk, now eliminated.
+Not yet verified against a real game launch (tracked under "Next steps" in the
+main plan doc, same as the rest of the fog-rendering redesign work).
+
+
+

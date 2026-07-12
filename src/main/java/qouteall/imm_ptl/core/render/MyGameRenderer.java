@@ -18,9 +18,11 @@ import net.minecraft.client.renderer.RenderBuffers;
 import net.minecraft.client.renderer.SectionBufferBuilderPack;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
 import net.minecraft.client.renderer.culling.Frustum;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.CardinalLighting;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.material.FogType;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
@@ -33,6 +35,7 @@ import qouteall.imm_ptl.core.IPGlobal;
 import qouteall.imm_ptl.core.block_manipulation.BlockManipulationClient;
 import qouteall.imm_ptl.core.compat.iris_compatibility.IrisInterface;
 import qouteall.imm_ptl.core.compat.sodium_compatibility.SodiumInterface;
+import qouteall.imm_ptl.core.ducks.IECamera;
 import qouteall.imm_ptl.core.ducks.IEGameRenderer;
 import qouteall.imm_ptl.core.ducks.IEMinecraftClient;
 import qouteall.imm_ptl.core.ducks.IEParticleManager;
@@ -41,7 +44,6 @@ import qouteall.imm_ptl.core.miscellaneous.IPVanillaCopy;
 import qouteall.imm_ptl.core.mixin.client.render.IERenderSystem;
 import qouteall.imm_ptl.core.mixin.client.render.IESectionRenderDispatcher;
 import qouteall.imm_ptl.core.render.context_management.DimensionRenderHelper;
-import qouteall.imm_ptl.core.render.context_management.FogRendererContext;
 import qouteall.imm_ptl.core.render.context_management.PortalRendering;
 import qouteall.imm_ptl.core.render.context_management.RenderStates;
 import qouteall.imm_ptl.core.render.context_management.WorldRenderInfo;
@@ -185,7 +187,19 @@ public class MyGameRenderer {
         client.player.noPhysics = true;
         ieGameRenderer.ip_setDoRenderHand(doRenderHand);
         
-        FogRendererContext.swappingManager.pushSwapping(newDimension);
+        // MC 26.1: FogRenderer no longer has static per-dimension color state to
+        // shadow-swap (the old MixinFogRenderer/StaticFieldsSwappingManager
+        // mechanism is gone -- see FogRendererContext). Instead, save the outer
+        // world's CameraRenderState.fogType/fogData here and directly install a
+        // freshly-computed replacement for the dimension about to be rendered
+        // below, mirroring GameRenderer.extractCamera()'s own real logic (the
+        // only place vanilla itself computes this). This is a source-confirmed
+        // translation, but still needs real in-game testing to confirm portal
+        // fog actually looks right end-to-end (see docs/migration-26.1-plan.md).
+        CameraRenderState cameraRenderState =
+            client.gameRenderer.getGameRenderState().levelRenderState.cameraRenderState;
+        FogType oldFogType = cameraRenderState.fogType;
+        FogData oldFogData = cameraRenderState.fogData;
         ((IEParticleManager) client.particleEngine).ip_setWorld(newWorld);
         if (BlockManipulationClient.remotePointedDim == newDimension) {
             client.hitResult = BlockManipulationClient.remoteHitResult;
@@ -194,6 +208,16 @@ public class MyGameRenderer {
             client.hitResult = null;
         }
         ieGameRenderer.ip_setCamera(newCamera);
+        ((IECamera) newCamera).portal_setPos(thisTickCameraPos);
+        ((IECamera) newCamera).portal_setFocusedEntity(client.getCameraEntity());
+        cameraRenderState.fogType = newCamera.getFluidInCamera();
+        cameraRenderState.fogData = ieGameRenderer.ip_getFogRenderer().setupFog(
+            newCamera,
+            renderDistance,
+            client.getDeltaTracker(),
+            client.gameRenderer.getBossOverlayWorldDarkening(RenderStates.getPartialTick()),
+            newWorld
+        );
         
         RenderBuffers newRenderBuffers = null;
         if (IPGlobal.useSecondaryEntityVertexConsumer) {
@@ -262,7 +286,8 @@ public class MyGameRenderer {
         
         ((IEWorldRenderer) worldRenderer).portal_setTransparencyShader(oldTransparencyShader);
         
-        FogRendererContext.swappingManager.popSwapping();
+        cameraRenderState.fogType = oldFogType;
+        cameraRenderState.fogData = oldFogData;
         
         ((IEWorldRenderer) oldWorldRenderer).portal_setChunkInfoList(oldChunkInfoList);
         VisibleSectionDiscovery.returnList(newChunkInfoList);

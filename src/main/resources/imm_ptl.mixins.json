@@ -94,7 +94,6 @@
     "client.interaction.MixinMinecraft_B",
     "client.interaction.MixinMultiPlayerGameMode",
     "client.multiworld_awareness.MixinBiomeAmbientSoundPlayer",
-    "client.multiworld_awareness.MixinFogRenderer",
     "client.particle.IEParticle",
     "client.particle.MixinParticleEngine",
     "client.render.IERenderSystem",

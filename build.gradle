@@ -90,11 +90,6 @@ dependencies {
 
     compileOnly "${project.iris_path}"
 
-    compileOnly("com.github.qouteall:GravityChanger:${gravity_changer_version}") {
-        exclude(group: "net.fabricmc.fabric-api")
-        transitive = false
-    }
-
     // put these into inner mod to reduce duplicate MC jar
 
     if (project.enable_sodium.equals('true')) {
@@ -106,12 +101,6 @@ dependencies {
         implementation "org.anarres:jcpp:1.4.14" // for iris
         implementation 'io.github.douira:glsl-transformer:2.0.0-pre13' // for iris
         implementation 'org.antlr:antlr4-runtime:4.11.1' // for iris
-    }
-
-    if (project.enable_gravity_changer.equals('true')) {
-        localRuntime("com.github.qouteall:GravityChanger:${gravity_changer_version}") {
-            exclude(group: "net.fabricmc.fabric-api")
-        }
     }
 
     if (project.enable_geckolib.equals('true')) {

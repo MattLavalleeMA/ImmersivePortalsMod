@@ -190,12 +190,9 @@ targets** composited later (`LevelRenderer`'s `targets.translucent`/`.itemEntity
 graph) — any redesigned masking algorithm needs to account for this multi-target
 compositing, not assume a single shared framebuffer+stencil-buffer for the whole frame.
 
-**Current compile state:** run `python migration_tools/parse_compile_errors.py --run`
-for the live count. **The current authoritative count is 25 errors / 7 distinct
-symbols**, and every remaining error is confined to a single file,
-`GravityChangerInterface.java` (see "Blocking / external dependency issues" and
-"Outstanding work" below, which are the single source of truth for the current
-count and what's left). Full error-count progression history is in
+**Current compile state: 0 errors.** Run `python migration_tools/parse_compile_errors.py
+--run` to confirm. The project now compiles clean — full error-count progression
+history is in
 [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#compile-error-count-progression-for-reference).
 
 The `ValueInput`/`ValueOutput` entity save-data rewrite and the large wave of small
@@ -212,15 +209,37 @@ imported directly into this repo (`src/main/java/qouteall/dimlib`, merged
 already-working build pipeline instead of standing up a separate one. Full detail:
 [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#dimlib-merged-into-this-repo-as-an-in-repo-module--done).
 
+**GravityChanger support is dropped entirely — done.** Upstream
+(`com.github.qouteall/GravityChanger`) is archived (read-only since Apr 2026),
+last release targets mc1.20.4; this mod will simply not support it going
+forward. `GravityChangerInterface.java` had its real-API-bound
+`OnGravityChangerPresent` implementation removed, leaving only its existing
+no-op default `Invoker` (gravity always down); the Gradle dependency and its
+conditional activation in `IPModEntry.java` were removed too. This resolved the
+last 25 compile errors — **the project now compiles with 0 errors.** Full
+detail:
+[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#gravitychanger-support-dropped-stubbed-out--done).
+
+**`MixinFogRenderer.java`'s cross-dimension fog color swap is redesigned — done.**
+The old static-field-shadowing mixin (weave-time-broken — `FogRenderer` no
+longer has static color fields to shadow at all) was removed and replaced with
+a `FogRenderer.setupFog(Camera, int, DeltaTracker, float, ClientLevel)`-based
+redesign that needs no static state at all. Full detail:
+[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#mixinfogrendererjavas-cross-dimension-fog-color-swap-redesigned--done).
+
+**`MixinFogRenderer_A_CVB.java`'s weave-time-broken Mixin targets are fixed —
+done.** Found while investigating the above: this separate mixin (alternate
+dimensions' void-darkness override) still targeted the removed
+`FogRenderer.setupColor(...)`/`Camera.getPosition()`, which would also have
+hard-crashed Mixin weaving at game launch. Retargeted to the real replacements
+(`FogRenderer.computeFogColor(...)`/`Camera.position()`) — no behavior change,
+its handler body already used the new method names. Full detail:
+[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#mixinfogrenderer_a_cvbjavas-weave-time-broken-targets-fixed--done).
+
 ## Blocking / external dependency issues
 
-- **GravityChanger** (`com.github.qouteall/GravityChanger`) — upstream repo is
-  **archived** (read-only since Apr 2026), last release targets mc1.20.4. Already
-  disabled by default (`enable_gravity_changer=false`), non-blocking but permanently
-  dead unless forked/replaced. This is now the **only** remaining compile-error
-  cluster (25 errors / 7 symbols, all in `GravityChangerInterface.java`).
 - `geckolib` test dependency (`enable_geckolib=false`, off by default) — not
-  investigated, low priority.
+  investigated, low priority. Not a compile error today.
 
 ## Outstanding work
 
@@ -231,40 +250,45 @@ kept so cross-references elsewhere in this section stay valid.)
 
 ### Priority order for next session(s) (established after a full-landscape review)
 
-As of the latest run: **25 errors / 7 distinct symbols**, all confined to a single
-file, `GravityChangerInterface.java` (archived/dead upstream dependency, disabled
-by default). **Every genuinely mechanical/in-repo-fixable compile-error cluster is
-now done**, including the DimLib migration (now an in-repo module — see
-[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#dimlib-merged-into-this-repo-as-an-in-repo-module--done)).
+As of the latest run: **0 compile errors.** Every compile-error cluster is now
+resolved, including the DimLib migration (now an in-repo module — see
+[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#dimlib-merged-into-this-repo-as-an-in-repo-module--done)),
+the `net.minecraft.gizmos` debug-drawing system investigation (confirmed not a
+fit for this mod's own needs — see
+[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#netminecraftgizmos-debug-drawing-system--investigated-not-adopted)),
+and dropping GravityChanger support entirely (see
+[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#gravitychanger-support-dropped-stubbed-out--done)).
 Full changelog of every completed round is in
-[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md). **The
-priority list below is the only part of this sub-section that reflects actual
-remaining work.**
+[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md). **What's left
+now is exclusively genuinely-new design-and-test work (item 2, portal rendering
+algorithm redesign below), not a known bug/breakage to fix** — every
+weave-time-only issue that was previously tracked here has also now been
+resolved (see below).
 
 **Weave-time-only / runtime-only issues still open (not compile errors, so not in
 the count above — `MixinCamera.java`'s equivalent issue is already fixed, see the
 completed-work log):**
 
-- **`MixinFogRenderer.java` (`multiworld_awareness` package) `@Shadow`s 6 static
-  fields (`fogRed`/`fogGreen`/`fogBlue`/`targetBiomeFog`/`previousBiomeFog`/
-  `biomeChangedTime`) that no longer exist on `FogRenderer` at all** (confirmed
-  via `javap --private` — `FogRenderer` is now instance-based with GPU-buffer-
-  backed fog data, no mutable static color state to shadow). This mixin will fail
-  to weave. **Deliberately left unfixed** — there's no 1:1 mechanical replacement
-  for a static-field-swap mechanism against a class that's no longer
-  static/mutable at all; this needs an actual redesign plus real in-game testing,
-  not a guess. `FogRendererContext.getFogColorOf(...)` (the one caller that had an
-  actual compile error from this cluster) was already fixed independently (see the
-  completed-work log). **Still not fixed**: `RendererUsingStencil.java`'s separate
-  call to `FogRendererContext.getCurrentFogColor.get()` (reads the *actual
-  current* world's live fog color via the same broken static-field-swap
-  mechanism, a different use case from the cross-dimension query) — this one has
-  no compile error today (it only references the mod's own `Supplier<Vec3>`
-  field) but is runtime-broken since the underlying mixin won't weave. Needs a
-  real redesign of the whole `StaticFieldsSwappingManager`-based cross-dimension
-  fog color swapping scheme against the new instance/GPU-buffer `FogRenderer`,
-  with real in-game testing — same category as the portal-rendering-algorithm
-  redesign (item 2 below).
+- **`MixinDebugRenderer.java` (`portal_wand` package) targeted
+  `DebugRenderer.render(PoseStack, MultiBufferSource.BufferSource, double, double,
+  double)`, which is now fully removed** (confirmed via `inspect_class.py` —
+  `DebugRenderer`'s debug-overlay drawing was migrated wholesale to the new
+  declarative `net.minecraft.gizmos` API; `DebugRenderer` itself now only exposes
+  `emitGizmos(Frustum, double, double, double, float)`, called during the
+  CPU-only `extractLevel(...)` phase with no `PoseStack`/`MultiBufferSource`
+  available at all). Since `@Inject` is `require`d by default, this would have
+  hard-crashed Mixin weaving at game launch (not just silently no-op'd) — found
+  and neutralized while investigating the `net.minecraft.gizmos` system (see
+  [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#netminecraftgizmos-debug-drawing-system--investigated-not-adopted)).
+  The real `PoseStack`+`MultiBufferSource`+camera-position call site now lives
+  inside `LevelRenderer.addMainPass`'s captured `FramePass` lambda (confirmed via
+  decompiled source) — the same synthetic-lambda-method re-anchoring problem
+  already tracked for `MixinLevelRenderer.java`'s ~8 disabled hooks below.
+  Disabled (emptied, same precedent as `MixinLevelRenderer_BeforeIris.java`)
+  pending a real game launch to re-anchor against the actual lambda method; the
+  portal wand's marker-drawing logic itself (`PortalWandItem.clientRender`,
+  `ClientPortalWandPortalCreation`/`Drag`/`Copy.render(...)`) is untouched and
+  ready to be reconnected once a hook is found.
 - **`SectionRenderDispatcher.uploadAllPendingUploads()` removed with no
   replacement found** (confirmed via javap — the whole per-section async-upload-
   future-pumping concept from the old chunk pipeline doesn't appear to exist in
@@ -274,40 +298,6 @@ completed-work log):**
   `IPCGlobal.earlyRemoteUpload` debug toggle) stubbed to a no-op for now — needs
   real in-game testing across dimensions to see whether the new pipeline still
   has the original problem at all.
-
-**Priority order for remaining work:**
-
-1. **`net.minecraft.gizmos` debug-drawing system (newly discovered, not yet
-   investigated)**: vanilla's old `LevelRenderer.renderLineBox(...)` convenience
-   helper was removed outright (not renamed) — a `LineGizmo` class exists in a
-   brand-new `net.minecraft.gizmos` package that appears to be vanilla's own
-   replacement debug-drawing API. Worked around narrowly so far (hand-rolling the
-   one needed helper directly via `VertexConsumer` calls) — if more vanilla
-   debug-drawing helpers turn out to be missing elsewhere, the real Gizmo API
-   should be investigated properly instead of continuing to hand-roll
-   replacements one at a time.
-2. **`MixinFogRenderer.java` weave-time-only breakage (not a compile error)**:
-   `MixinFogRenderer.java`'s cross-dimension fog color swap needs a real redesign
-   against the new instance/GPU-buffer `FogRenderer`
-   (`RendererUsingStencil.java`'s `getCurrentFogColor` use is the one remaining
-   caller depending on it) — needs real in-game testing to get right, not a guess.
-3. **Leave for absolute last (confirmed external/blocked, dead upstream, no
-   migration effort planned)**: `GravityChangerInterface.java` (25 errors,
-   archived/dead upstream dependency, disabled by default). No fork/migration is
-   planned since the upstream project is dead; acceptable to just fence the file
-   off with a compile guard (e.g. excluding it from compilation when
-   `enable_gravity_changer=false`) rather than migrating it — still an open
-   decision, not yet made.
-
-**Every genuinely mechanical/in-repo-fixable compile-error cluster is done.** The
-only compile errors left (25) are confirmed-external/blocked (item 3 in the
-priority list above — GravityChanger, dead upstream, fenced off/dead). The
-still-stubbed portal-rendering-pipeline pieces tracked under
-"2. Portal rendering algorithm redesign" below (runtime work, not
-compile-error-driven anymore per its own section) and the newly-found
-weave-time-only issues (item 2 in the priority list above) are separate from the
-compile-error count entirely. Re-run `parse_compile_errors.py --run` to confirm
-before starting a new session.
 
 ### 2. Portal rendering algorithm redesign (runtime work, needs a real game launch)
 
@@ -441,17 +431,19 @@ Scripts live in `migration_tools/` (pure Python stdlib, no pip packages needed):
 
 ## Next steps
 
-1. **All genuinely in-repo-fixable compile errors are done, including the DimLib
-   migration (now an in-repo module).** The only compile errors left (25 across
-   7 symbols) are confirmed external/blocked — see "Priority order for remaining
-   work" above, item 3 (GravityChanger, fenced off/dead upstream). Re-run
-   `parse_compile_errors.py --run` at the start of the next session to confirm
-   this hasn't regressed.
-2. **All known compile-error-adjacent weave-time-only issues are now fixed**
-   (`MixinCamera.java` and `MixinGameRenderer.java`, both this round).
-   `MixinFogRenderer.java`'s cross-dimension fog-color-swap redesign (item 2
-   above) can likely wait until real in-game testing is possible, since it's
-   only reachable through the still-stubbed stencil-portal-rendering path.
+1. **All compile errors are done, including the DimLib migration (now an
+   in-repo module) and dropping GravityChanger support entirely.** The project
+   compiles with **0 errors.** Re-run `parse_compile_errors.py --run` at the
+   start of the next session to confirm this hasn't regressed.
+2. **All known weave-time-only issues are now fixed**, including `MixinCamera.java`/
+   `MixinGameRenderer.java` (an earlier round), `MixinFogRenderer.java`'s
+   cross-dimension fog-color-swap redesign, and `MixinFogRenderer_A_CVB.java`'s
+   stale Mixin retarget (both this round, see
+   [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#mixinfogrendererjavas-cross-dimension-fog-color-swap-redesigned--done)
+   and
+   [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#mixinfogrenderer_a_cvbjavas-weave-time-broken-targets-fixed--done)).
+   Still needs real in-game testing to confirm the redesign actually looks right
+   through portals, once a dev environment launch is possible (item 3 below).
 3. **Get the mod to actually launch in a dev environment** (`./gradlew runClient`)
    with portal rendering left in its current stubbed/no-op state, to establish a
    working baseline and start surfacing any remaining Mixin-weave-time-only

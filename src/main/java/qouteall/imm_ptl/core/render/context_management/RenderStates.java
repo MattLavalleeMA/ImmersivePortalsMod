@@ -108,8 +108,6 @@ public class RenderStates {
         portalRenderInfos = new ArrayList<>();
         portalsRenderedThisFrame = 0;
         
-        FogRendererContext.update();
-        
         renderStartNanoTime = System.nanoTime();
         
         updateViewBobbingFactor(cameraEntity);
