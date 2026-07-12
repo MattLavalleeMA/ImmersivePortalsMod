@@ -171,7 +171,9 @@ policy (see the top of this document) — follow the links for the full story.
 - Clip-plane shader-source injection (`ShaderCodeTransformation`), re-anchored onto vanilla's `ShaderManager.loadShader` — [implemented (source-injection half only), weave-time unverified](migration-26.1-plan-completed.md#clip-plane-shader-source-injection-re-anchored-onto-shadermanagerloadshader--implemented-source-injection-half-only-weave-time-unverified).
 - `./gradlew runClient` weave-time crash-fixing pass, round 1 (~24 Mixin fixes: renames, signature changes, and a few genuine-redesign items disabled with `require = 0`) — [implemented, launch still in progress](migration-26.1-plan-completed.md#gradlew-runclient-weave-time-crash-fixing-pass-round-1-24-mixin-fixes--implemented-launch-still-in-progress).
 - `./gradlew runClient` weave-time crash-fixing pass, round 2 (~19 more Mixin fixes, including 2 deferred/lazy-loaded ones only surfacing on manual click-through) — [done, client reaches a working main menu](migration-26.1-plan-completed.md#gradlew-runclient-weave-time-crash-fixing-pass-round-2--client-now-reaches-the-main-menu).
-- `./gradlew runClient` weave-time crash-fixing pass, round 3 (~10 more Mixin/data fixes surfacing from the Create-World-with-dim_stack and actual world-join workflow) — [fixes applied, 0 compile errors, NOT YET launch-verified — the last fix in this round postdates the last captured launch log](migration-26.1-plan-completed.md#gradlew-runclient-weave-time-crash-fixing-pass-round-3--player-joinworld-creation-workflow-fixes-applied-not-yet-launch-verified).
+- `./gradlew runClient` weave-time crash-fixing pass, round 3 (~10 more Mixin/data fixes surfacing from the Create-World-with-dim_stack and actual world-join workflow) — [done, fixes confirmed correct in round 4](migration-26.1-plan-completed.md#gradlew-runclient-weave-time-crash-fixing-pass-round-3--player-joinworld-creation-workflow-fixes-applied-not-yet-launch-verified).
+- `./gradlew runClient` weave-time crash-fixing pass, round 4 (5 more Mixin/runtime fixes) — [done — client now creates a world, joins it, and survives real gameplay including repeated nether-portal crossings](migration-26.1-plan-completed.md#gradlew-runclient-weave-time-crash-fixing-pass-round-4--first-successful-world-join--working-nether-portal-travel).
+- Gradle configuration cache enabled + two `build.gradle` config-cache incompatibilities fixed — [done](migration-26.1-plan-completed.md#gradle-configuration-cache-enabled--buildgradle-fixes--done).
 
 ## Blocking / external dependency issues
 
@@ -421,85 +423,94 @@ Scripts live in `migration_tools/` (pure Python stdlib, no pip packages needed):
    [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md)).
    Re-run `parse_compile_errors.py --run` at the start of the next session to
    confirm this hasn't regressed.
-2. **Get the mod to actually launch in a dev environment** (`./gradlew
-   runClient`) — **main menu reached successfully; a full create-world →
-   join-world attempt is mid-progress, next fix unverified.** Since
-   `imm_ptl.mixins.json` requires every mixin to apply, each launch attempt
-   used to abort on the first weave-time crash and surface exactly one new
-   issue (a rename/signature-change/removal invisible to `compileJava`); three
-   rounds so far (~24 + ~19 + ~10 fixes) got the client from nothing all the
-   way to a fully working, clickable title screen and partway through actually
-   creating/joining a world — full detail in
+2. **`./gradlew runClient` now reaches in-game content, not just the main
+   menu: a new world can be created, joined, and played, including repeated
+   nether-portal crossings with no crash.** Since `imm_ptl.mixins.json`
+   requires every mixin to apply, each launch attempt used to abort on the
+   first weave-time crash and surface exactly one new issue (a
+   rename/signature-change/removal invisible to `compileJava`); four rounds so
+   far (~24 + ~19 + ~10 + 5 fixes) took the client from nothing all the way to
+   a working title screen, then through world creation/join, and now through
+   actual gameplay and portal travel — full detail in
    [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#gradlew-runclient-weave-time-crash-fixing-pass-round-1-24-mixin-fixes--implemented-launch-still-in-progress),
    [round 2](migration-26.1-plan-completed.md#gradlew-runclient-weave-time-crash-fixing-pass-round-2--client-now-reaches-the-main-menu),
+   [round 3](migration-26.1-plan-completed.md#gradlew-runclient-weave-time-crash-fixing-pass-round-3--player-joinworld-creation-workflow-fixes-applied-not-yet-launch-verified),
    and
-   [round 3](migration-26.1-plan-completed.md#gradlew-runclient-weave-time-crash-fixing-pass-round-3--player-joinworld-creation-workflow-fixes-applied-not-yet-launch-verified).
+   [round 4](migration-26.1-plan-completed.md#gradlew-runclient-weave-time-crash-fixing-pass-round-4--first-successful-world-join--working-nether-portal-travel).
 
-   **Important:** a clean main-menu launch does **not** mean every Mixin is
+   **Important:** reaching in-world gameplay does **not** mean every Mixin is
    fixed. Many mixin targets (any per-button `Screen` subclass, event-factory
-   lambdas triggered on first fire, etc.) are only classloaded — and thus only
-   weave-time-validated — when a specific menu/feature is actually used. Round
-   2 already found two such **deferred** issues this way (`MixinSplashManager_CVB`'s
-   immutable-list crash, which was actually the root cause of a fully
-   black/blank-but-responsive title screen with **no logged Mixin error at
-   all**; and `MixinCreateWorldScreen_CVB`'s constructor signature change,
-   which only threw when clicking Singleplayer → Create New World). Round 3
-   found several more of the same shape while clicking through Create World's
-   dim_stack "More" tab and actually creating/joining a world (see the round 3
-   changelog link above for full detail) — including a data-pack-level crash
-   with **no Mixin-apply error at all** (`DimensionType`'s new required
-   `has_ender_dragon_fight` field, causing world creation to hang silently at
-   "Preparing for world creation...").
+   lambdas triggered on first fire, any code path not yet exercised by the
+   specific things tried so far, etc.) are only classloaded — and thus only
+   weave-time-validated — when actually used. Rounds 2-4 each found further
+   **deferred** issues this way purely by continuing to click through/play
+   further (see the round links above for full detail on each) — expect the
+   same pattern to continue: e.g. round 4's nether-portal crossings never
+   exercised the End dimension, custom (non-nether) portals, the dim_stack
+   GUI's actual runtime behavior beyond opening the screen, Multiplayer,
+   Options/video settings, or Mod Menu's config screens at all.
 
-   **Immediate next action — pick up exactly here:** round 3's last fix
-   (`MixinServerGamePacketListenerImpl`'s `isEntityCollidingWithAnythingNew`
-   retarget, plus the `MixinServerEntity` dead-code removal made right after
-   it) was made **after** the most recent captured `runClient` crash log, so it
-   has not been launch-tested yet even though `parse_compile_errors.py --run`
-   confirms 0 compile errors. Before doing anything else: re-run
-   `./gradlew runClient`, retry Singleplayer → Create New World → actually
-   entering the world, and check `run/logs/latest.log` for either a clean
-   world-join or the next weave-time/runtime crash. Only once that's confirmed
-   should click-through continue to other menus/features (Multiplayer,
-   Options/video settings, Mod Menu's config screens, portal creation/use,
-   etc.), fixing each new deferred crash as it's hit using the same established
-   workflow — read the crash log for the failing mixin class/target symbol,
-   extract the real current class shape from the sources jar
+   **Immediate next action:** keep `./gradlew runClient` running and continue
+   manually clicking through/playing — priority areas not yet reached by any
+   verified launch, roughly in order of how likely they are to hide a new
+   crash:
+   - The End dimension (a different portal type from the nether portal
+     already exercised — End portals have their own placement/frame code
+     paths that haven't been triggered at all yet).
+   - Custom portals created via the mod's own portal-creation tools/commands
+     (`PortalWandItem`, `CommandStickItem`, `PortalDebugCommands`) — the
+     nether-portal crossings so far only exercised vanilla's own
+     `NetherPortalEntity` auto-generation path.
+   - The dim_stack peripheral GUI feature end-to-end (opening the "More" tab
+     screen was fixed in round 3; actually creating/reordering/removing
+     entries and confirming the resulting world generates its stacked
+     dimensions correctly has not been tried).
+   - Multiplayer screen, Options/video settings (including toggling
+     Sodium/Iris-specific settings), and Mod Menu's config screens for this
+     mod and its dependencies.
+   - Anything gated behind `enable_sodium`/`enable_iris` beyond what's already
+     been exercised (both `true` in `gradle.properties`, so all of those
+     mixins are being woven and could still hide an unexercised crash).
+   - `qouteall.dimlib.*` (merged into this repo as a module, not touched at
+     all yet).
+   - The server-side-only path (only ever launched via `runClient`, which
+     loads an integrated server too — a dedicated `runServer` launch might
+     surface different mixins in a different order).
+
+   For each new crash found: read the crash log/`run/logs/latest.log` for the
+   failing mixin class/target symbol, extract the real current class shape
+   from the sources jar
    (`.gradle/loom-cache/minecraftMaven/net/minecraft/minecraft-merged-*/26.1.2/*-sources.jar`,
    via `zipfile.ZipFile(jar).extract('path/To/Class.java', path='migration_tools/reports/decompiled_src2')`
    — check that directory first, many classes already extracted from prior
-   fixes; Sodium/Iris jars decompile similarly from
-   `~/.gradle/caches/modules-2/files-2.1/net.fabricmc.fabric-api/.../*.jar` or
-   the relevant Sodium/Iris module jar under `~/.gradle/caches/modules-2/`,
-   with Vineflower, or use `migration_tools/inspect_class.py --private
-   [--jar <path>]` for a fast `javap`-based signature check first — and per the
-   Tooling section above, check GitHub via the GitHub MCP tools for a real
-   Fabric mod's equivalent Mixin *before* decompiling vanilla cold), fix/
-   retarget the mixin (or disable with `require = 0` + a comment if it needs
-   genuine redesign), confirm `python migration_tools/parse_compile_errors.py
-   --run` still shows 0 errors, then relaunch and keep clicking through.
+   fixes; Sodium/Iris jars decompile similarly from the relevant module jar
+   under `~/.gradle/caches/modules-2/`, with Vineflower, or use
+   `migration_tools/inspect_class.py --private [--jar <path>]` for a fast
+   `javap`-based signature check first — and per the Tooling section above,
+   check GitHub via the GitHub MCP tools for a real Fabric mod's equivalent
+   Mixin *before* decompiling vanilla cold). **When retargeting an `@At(INVOKE)`
+   whose target method moved/renamed, don't assume the owner class in the
+   descriptor should be the class that declares the method** — Mixin matches
+   the literal bytecode `invokevirtual` instruction, whose owner is the
+   *receiver's static type at the call site* (confirmed the hard way in round
+   4's `absMoveTo`→`absSnapTo` fix: retargeting the owner to the declaring
+   class first failed with the exact same "Scanned 0 target(s)" error;
+   `javap -c` on the real compiled class was what actually resolved it). Then
+   confirm `python migration_tools/parse_compile_errors.py --run` still shows
+   0 errors, and relaunch.
 
-   Also worth a blind pre-emptive check for a black/blank screen with **no**
-   Mixin-apply error logged: grep the log broadly for `Caught error`/`ERROR`
-   (not just Mixin-specific patterns), since a swallowed exception in an
-   unrelated subsystem (like the `SplashManager`/`has_ender_dragon_fight` cases
-   above) can silently break something without ever showing as a Mixin crash.
-
-   **Known remaining risk areas not yet reached by a launch/click-through
-   attempt:** `qouteall.dimlib.*` (merged into this repo as a module, not
-   touched at all yet); anything gated behind `enable_sodium`/`enable_iris`
-   (both `true` in `gradle.properties`, so those mixins are being woven and
-   could still crash, coverage incomplete); in-world/portal-specific mixins
-   (world creation/join is the very thing currently blocked, see "Immediate
-   next action" above — portal creation/use itself hasn't been reached yet);
-   the server-side-only path (only ever launched via `runClient`, which loads
-   an integrated server too — a dedicated `runServer` launch might surface
-   different mixins in a different order).
-3. **Once the client actually launches successfully:** follow the in-game
-   testing checklist already written up below (fog, debug renderer, portal
-   creation, chunk loading/ticket behavior, watch for stutter near portals from
-   the Sodium/`SectionOcclusionGraph` fixes, etc.), and update this document's
-   "Status"/compile-state sections plus
+   Also worth a blind pre-emptive check for a black/blank screen or a silent
+   gameplay bug with **no** Mixin-apply error logged: grep the log broadly for
+   `Caught error`/`ERROR` (not just Mixin-specific patterns), since a swallowed
+   exception in an unrelated subsystem can silently break something without
+   ever showing as a Mixin crash — this is exactly how round 4's
+   `ClientboundPlayerPositionPacket` bug was hiding (a genuine runtime NPE on
+   every position packet, not a weave-time/Mixin-apply failure at all).
+3. **Once broader in-game click-through/play-testing is further along:**
+   follow the in-game testing checklist already written up below (fog, debug
+   renderer, portal creation, chunk loading/ticket behavior, watch for stutter
+   near portals from the Sodium/`SectionOcclusionGraph` fixes, etc.), and
+   update this document's "Status"/compile-state sections plus
    [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md)'s
    "weave-time unverified" annotations once each corresponding fix is confirmed
    actually working in-game, not just non-crashing.

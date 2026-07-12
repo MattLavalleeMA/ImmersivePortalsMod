@@ -44,8 +44,19 @@ public class MixinSodiumRenderSectionManager implements IESodiumRenderSectionMan
      * Just cancel this optimization.
      * isSectionVisible() is currently only used for culling entities.
      */
-    @Inject(method = "isSectionVisible", at = @At("HEAD"), cancellable = true)
-    private void onIsSectionVisible(int x, int y, int z, CallbackInfoReturnable<Boolean> cir) {
+    // MC 26.1 / Sodium 0.9.1: RenderSectionManager.isSectionVisible(int,int,int)
+    // (chunk-section-coordinate based) was removed entirely -- confirmed via javap,
+    // no method by that name remains. SodiumWorldRenderer.isEntityVisible(...) (the
+    // only caller of the old method, per its own doc comment above) now calls
+    // RenderSectionManager.isBoxVisible(double,double,double,double,double,double)
+    // instead (an AABB-min/max-corners based check), confirmed via decompile of the
+    // exact pinned sodium-mc26.1.2-0.9.1-fabric.jar. Same cancel-the-optimization
+    // intent, just retargeted to the new signature/semantics.
+    @Inject(method = "isBoxVisible", at = @At("HEAD"), cancellable = true)
+    private void onIsSectionVisible(
+        double x1, double y1, double z1, double x2, double y2, double z2,
+        CallbackInfoReturnable<Boolean> cir
+    ) {
         if (RenderStates.portalsRenderedThisFrame != 0) {
             cir.setReturnValue(true);
         }

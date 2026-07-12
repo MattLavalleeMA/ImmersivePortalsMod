@@ -1,6 +1,5 @@
 package qouteall.imm_ptl.core.compat.mixin.sodium;
 
-import net.caffeinemc.mods.sodium.client.render.chunk.RenderSection;
 import net.caffeinemc.mods.sodium.client.render.chunk.occlusion.OcclusionCuller;
 import net.caffeinemc.mods.sodium.client.render.viewport.Viewport;
 import net.caffeinemc.mods.sodium.client.util.task.CancellationToken;
@@ -40,9 +39,11 @@ import qouteall.imm_ptl.core.render.context_management.PortalRendering;
 // here, because the injection point lives inside the method itself, not at a caller.
 @Mixin(OcclusionCuller.class)
 public abstract class MixinSodiumOcclusionCuller {
-    @Shadow(remap = false)
-    protected abstract RenderSection getRenderSection(int x, int y, int z);
-    
+    // MC 26.1 / Sodium 0.9.1: OcclusionCuller.getRenderSection(int,int,int) was
+    // removed entirely with no replacement on this class (confirmed via javap --
+    // section lookups now go through the private `sections: SectionStorage` field
+    // instead). This @Shadow was dead code in this mixin (never actually called
+    // anywhere in this file) -- removed rather than re-anchored.
     @Shadow(remap = false)
     private SectionPos origin;
     

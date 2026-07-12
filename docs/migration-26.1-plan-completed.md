@@ -2118,12 +2118,16 @@ Fixes applied so far, in the order the crashes were hit:
   `ClientboundPlayerPositionPacket` was rewritten from imperative
   `read()`/`write(FriendlyByteBuf)` methods into a plain record + declarative
   `StreamCodec.composite(...)`. With no write/read-constructor left to inject
-  into at all, both mixins were disabled (`require = 0`) — the real fix needs
-  wrapping the `STREAM_CODEC` itself (genuine redesign, deferred). Note: the
+  into at all, both mixins were disabled (`require = 0`) at the time. **Update:**
+  the real fix (wrapping the `STREAM_CODEC` itself) is now done — see
+  [round 4](#gradlew-runclient-weave-time-crash-fixing-pass-round-4--first-successful-world-join--working-nether-portal-travel);
+  `MixinClientboundPlayerPositionPacket.java` no longer exists, superseded by a
+  single unified fix in `MixinPlayerPositionLookS2CPacket.java`. Note: the
   sibling C2S `ServerboundMovePlayerPacket.Pos/PosRot/Rot/StatusOnly` family was
   **not** converted to `StreamCodec` (still has imperative
   `read(FriendlyByteBuf)` static methods) — only the S2C
-  `ClientboundPlayerPositionPacket` needed disabling, not the whole family.
+  `ClientboundPlayerPositionPacket` ever needed this treatment, not the whole
+  family.
 - Block/Item registration: MC 26.1 requires
   `BlockBehaviour.Properties.setId(ResourceKey<Block>)`/
   `Item.Properties.setId(ResourceKey<Item>)` to be called **before** constructing
@@ -2383,15 +2387,170 @@ Fixes applied, in order:
   was genuinely dead/redundant code, not a rename.
 
 **Status: fixes applied, 0 compile errors (verified via `parse_compile_errors.py
---run`), but NOT YET launch-tested as a whole.** The last captured `runClient`
-crash log (before the `isEntityCollidingWithAnythingNew` fix above) showed world
-creation reaching the "Saving World"/player-spawn stage and then failing weave-time
-on the stale `isPlayerCollidingWithAnythingNew` target; that fix — and the
-`MixinServerEntity` cleanup after it — have not yet been exercised by an actual
-launch. **Next action: re-run `./gradlew runClient`, retry creating/joining a
-world, and confirm whether it now succeeds** — see
-[migration-26.1-plan.md](migration-26.1-plan.md)'s "Next steps" for full handoff
-detail.
+--run`).** Launch-tested in round 4 below — the `isEntityCollidingWithAnythingNew`
+retarget and the `MixinServerEntity` cleanup both turned out correct; round 4
+covers the further crashes found beyond this point and the eventual successful
+world-join.
+
+## `./gradlew runClient` weave-time crash-fixing pass, round 4 — first successful world-join + working nether portal travel
+
+Continuation of round 3, picking up exactly where it left off (relaunch after the
+`isEntityCollidingWithAnythingNew`/`MixinServerEntity` fixes above). Found and fixed
+5 more weave-time/runtime issues, one at a time, each discovered by relaunching after
+the previous fix — **this round ends with the client successfully creating a world,
+joining it, and traveling back and forth through a nether portal multiple times with
+no crash**, the first time any in-world content has been reached at all in this
+migration.
+
+Fixes applied, in order:
+
+- `MixinServerGamePacketListenerImpl.java`'s `onHandleAcceptTeleportPacket`:
+  `Entity.absMoveTo(double,double,double,float,float)` was renamed to
+  `absSnapTo(double,double,double,float,float)` — confirmed via decompile that the
+  real `handleAcceptTeleportPacket` body still calls this at the exact same point.
+  **First attempt retargeted the `@At` INVOKE descriptor's owner to
+  `Entity` (where the method is declared) and got the same "Scanned 0 target(s)"
+  failure again** — turned out wrong: `@At(INVOKE)` matches the literal bytecode
+  `invokevirtual` instruction's owner in the constant pool, which javac emits based
+  on the **receiver's static type at the call site** (`this.player`, statically typed
+  `ServerPlayer`), not the class that actually declares the method. Confirmed via
+  `javap -c` on the real compiled class: `invokevirtual #225 // Method
+  net/minecraft/server/level/ServerPlayer.absSnapTo:(DDDFF)V`. Fixed by keeping the
+  owner as `ServerPlayer` and only changing the method name — this is a reusable
+  lesson (see `/memories/user` tool-quirks notes), not specific to this one fix.
+- `MixinSodiumRenderSectionManager.java`: `RenderSectionManager
+  .isSectionVisible(int, int, int)` (a chunk-section-coordinate based check used only
+  for entity culling, per the mixin's own doc comment) was removed entirely with no
+  same-shaped replacement. Traced the real current call chain by decompiling the
+  exact pinned `sodium-mc26.1.2-0.9.1-fabric.jar`: Sodium's entity-culling Mixin
+  (`EntityRendererMixin.preShouldRender`) now calls
+  `SodiumWorldRenderer.isEntityVisible(EntityRenderer, Entity)`, which calls
+  `SodiumWorldRenderer.isBoxVisible(6 floats)`, which calls
+  `RenderSectionManager.isBoxVisible(double×6)` (min/max-corners AABB shape, not the
+  old int-section-coordinate shape) — confirmed via `javap -c` bytecode disassembly
+  at every hop, not just method-listing. Retargeted the `@Inject` from
+  `isSectionVisible` to `isBoxVisible`, updating the handler's parameter list from
+  `(int, int, int)` to `(double, double, double, double, double, double)`; the
+  cancel-the-optimization-during-portal-rendering logic itself is unchanged.
+- `MixinSodiumOcclusionCuller.java`: a `@Shadow protected abstract RenderSection
+  getRenderSection(int, int, int)` no longer exists anywhere on `OcclusionCuller`
+  (confirmed via `javap` listing every method on the real class — section lookups
+  now go entirely through the private `sections: SectionStorage` field instead, with
+  no public/protected accessor left). This shadow was dead code in the mixin (never
+  actually called by any of its own methods) — removed outright rather than
+  re-anchored, along with its now-unused `RenderSection` import. The mixin's real
+  purpose (portal cave-culling origin override on `findVisible`, from round 2) was
+  untouched and still compiles/works.
+- `qouteall.imm_ptl.core.mixin.client.multiworld_awareness.MixinBiomeAmbientSoundPlayer.java`
+  — **deleted entirely, not re-anchored.** Its `@Shadow @Final private BiomeManager
+  biomeManager` field no longer exists on `BiomeAmbientSoundsHandler` at all
+  (confirmed via `javap`: the class has no `BiomeManager`-typed field of any kind
+  anymore). Decompiling `BiomeAmbientSoundsHandler.tick()` showed why: it now does
+  `Level level = this.player.level();` fresh at the very top of every single tick
+  call and derives all ambient-sound/mood state from that live level via
+  `level.environmentAttributes()` — there is no cached biome/level reference left
+  anywhere in the class for a cross-dimension mod to keep in sync, because vanilla
+  itself re-fetches the live dimension every tick now. This mixin's entire purpose
+  (`biomeManager = player.level().getBiomeManager()` on a `@Inject` `tick()` HEAD
+  hook) is fully subsumed by vanilla's own new behavior. Removed the file and its
+  `imm_ptl.mixins.json` registration entry.
+- `MixinSodiumViewport.java`: `Viewport`'s old 6-float-corners
+  `isBoxVisible(float,float,float,float,float,float)` was split into a completely
+  different `isBoxVisible(int,int,int)` (single-point `testSection`-based check,
+  confirmed via bytecode) plus a new `isBoxVisibleDirect(float x, float y, float z,
+  float radius)` (center+radius shape). Confirmed via `javap -c` that
+  `isBoxVisibleDirect` is the one that still internally expands to 6 corners
+  (`x±radius`, `y±radius`, `z±radius`) and calls `Frustum.testAab(FFFFFF)Z` — the
+  exact same descriptor the existing `@Redirect` already targeted. Since a
+  `@Redirect` on an INVOKE only cares about matching the redirected call's own
+  receiver+args (unchanged here), the *only* needed change was the `@Redirect`'s
+  `method` selector string, from `"isBoxVisible"` to `"isBoxVisibleDirect"` — the
+  handler signature and body were already correct and untouched.
+- `ClientboundPlayerPositionPacket`'s cross-dimension tagging — **the previously-
+  deferred `STREAM_CODEC`-wrapping redesign from round 1/2 (see the "Small
+  mechanical fixes" note on this packet further up this document) is now done,**
+  and this was a genuine runtime bug, not just a Mixin-apply failure: with both
+  the old read-side and write-side hooks disabled (`require = 0`), the client's
+  `MixinClientPacketListener.onProcessingPositionPacket` unconditionally called
+  `.identifier()` on the packet's (never-populated, always-null)
+  `ip_getPlayerDimension()`, throwing an NPE on **every single position packet**
+  the server ever sent — this is what actually blocked reaching in-world content at
+  all, and would have blocked movement/portal-teleport packets specifically.
+  Fixed by wrapping `ClientboundPlayerPositionPacket.STREAM_CODEC` itself: added
+  `@Shadow @Final @Mutable private static StreamCodec<FriendlyByteBuf,
+  ClientboundPlayerPositionPacket> STREAM_CODEC` plus a static `@Inject(method =
+  "<clinit>", at = @At("TAIL"))` that captures the original codec, then reassigns
+  `STREAM_CODEC` to a `StreamCodec.of(encoder, decoder)` wrapper: the encoder calls
+  the original encode then unconditionally writes the dimension key (server only
+  ever encodes this S2C packet, matching the old `write()` hook's own
+  unconditional behavior); the decoder calls the original decode then, only if
+  `ImmPtlNetworkConfig.doesServerHaveImmPtl()` (client-only state, matching the old
+  `onRead` hook's own conditional), reads the dimension key back and calls
+  `ip_setPlayerDimension(...)` on the freshly-decoded record instance (Mixin-added
+  fields on a record class work fine as extra, non-canonical-constructor state,
+  same as any other class). Since the packet class (and its `STREAM_CODEC` field)
+  is shared code loaded identically on both server and client, **one mixin in the
+  `common` package (`MixinPlayerPositionLookS2CPacket.java`) now covers both
+  encode and decode** — the separate client-side
+  `MixinClientboundPlayerPositionPacket.java` (which only ever held the disabled
+  read-side hook) is now fully redundant and was deleted, along with its
+  `imm_ptl.mixins.json` registration entry.
+
+**Status: `./gradlew runClient` now successfully creates a new world, joins it, and
+survives real gameplay** — confirmed by the client's own log: player spawn,
+advancement triggers, `[ImmPtl] Client accepted position packet ...` (the exact
+code path the `ClientboundPlayerPositionPacket` fix above touches, now running
+cleanly on every position update), and **four successful nether-portal crossings in
+a row** (`ClientTeleportationManager Client Teleported Statically`, alternating
+`minecraft:overworld` ↔ `minecraft:the_nether`) with zero exceptions, before the
+session was ended intentionally. This is the first time any in-world/portal content
+has been reached in this migration. `python migration_tools/parse_compile_errors.py
+--run` confirms 0 compile errors throughout. Not yet covered by this round: the
+End dimension, custom (non-nether) portals, the dim_stack GUI feature end-to-end,
+Multiplayer/Options menus, and Mod Menu's config screens — see
+[migration-26.1-plan.md](migration-26.1-plan.md)'s "Next steps" for the current
+handoff state.
+
+## Gradle configuration cache enabled + build.gradle fixes — done
+
+Unrelated to the Mixin/launch work above — addressed two build-tooling warnings
+surfacing at the end of every `./gradlew runClient` invocation ("Consider enabling
+the configuration cache to speed up this build" and a "deprecated Gradle features"
+notice).
+
+- **Root cause of the deprecation warning is entirely inside Fabric Loom itself,
+  not this project's `build.gradle`.** `gradlew tasks --warning-mode all` showed:
+  "Reading injected service of type Project at execution time has been deprecated.
+  This will fail with an error in Gradle 10." The full stack trace traces this to
+  `net.fabricmc.loom.configuration.CompileConfiguration.lambda$run$0` →
+  `CompileConfiguration_Decorated.getProject` — upstream Loom code. Checked
+  Fabric Loom's GitHub releases: **1.17.13 (already pinned in this project) is the
+  latest release**, so there's no newer version to upgrade to that fixes this yet.
+  Not fixable from this repo directly.
+- **Enabling the configuration cache incidentally avoids that exact warning
+  anyway** (verified from a fully clean daemon + cleared
+  `.gradle/configuration-cache`, with both a lightweight `tasks` invocation and a
+  full `runClient` launch) — Loom apparently takes a different, cache-safe code
+  path when the configuration cache is active that never calls the deprecated API.
+  Added `org.gradle.configuration-cache=true` to `gradle.properties`.
+- Enabling it surfaced **two real, fixable config-cache incompatibilities in this
+  project's own `build.gradle`**, both the same bug shape: a Groovy closure that
+  runs at *copy-task execution time* (`filesMatching{}`/`rename{}` on a
+  `ProcessResources`/`Jar` task) referencing `project`/`project.xxx` directly
+  inside the closure body — disallowed under the configuration cache, since
+  `Project` can only safely be captured at *configuration* time, not carried into a
+  deferred execution-time closure. Fixed both by capturing the needed value into a
+  plain local variable before the closure, then referencing the local var instead:
+  - `processResources { filesMatching("fabric.mod.json") { expand "version": ... } }`
+    — capture `String modVersion = project.version` first.
+  - `jar { from("LICENSE") { rename { ... } } }` — capture `String archivesName =
+    project.base.archivesName.get()` first.
+- Verified end-to-end after both build.gradle fixes: `compileJava`, `jar`, and a
+  full `runClient` launch (the same session that reached the nether-portal-travel
+  milestone above) all complete cleanly with the configuration cache enabled and
+  reused on subsequent invocations (`Reusing configuration cache.` /
+  `Configuration cache entry reused.`).
+
 
 
 

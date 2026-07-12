@@ -135,8 +135,14 @@ dependencies {
 processResources {
     inputs.property "version", project.version
 
+    // Capture the version at configuration time into a plain local variable --
+    // referencing `project`/`project.version` directly inside the filesMatching
+    // closure is only evaluated at task execution time, which is unsupported
+    // under the configuration cache (Gradle disallows Groovy closures capturing
+    // the Project script object across the configuration/execution boundary).
+    String modVersion = project.version
     filesMatching("fabric.mod.json") {
-        expand "version": project.version
+        expand "version": modVersion
     }
 }
 
@@ -170,8 +176,12 @@ jar {
         archiveFileName = "${project.archives_base_name}-${project.mod_version}-mc${project.minecraft_version}-fabric.jar"
     }
 
+    // Same configuration-cache constraint as processResources above: the `rename`
+    // closure runs at copy-task execution time, so `project` can't be referenced
+    // inside it directly -- capture the resolved name at configuration time instead.
+    String archivesName = project.base.archivesName.get()
     from("LICENSE") {
-        rename { "${it}_${project.base.archivesName.get()}"}
+        rename { "${it}_${archivesName}" }
     }
 }
 

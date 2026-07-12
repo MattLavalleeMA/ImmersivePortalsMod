@@ -294,11 +294,20 @@ public abstract class MixinServerGamePacketListenerImpl implements IEServerPlayN
     
     // if the awaiting position is in a different dimension, move the player accordingly
     // avoid messing up position for different dimensions
+    // MC 26.1: Entity.absMoveTo(double,double,double,float,float) was renamed to
+    // absSnapTo(double,double,double,float,float) (confirmed via decompile: same
+    // call site inside handleAcceptTeleportPacket, same 5-arg shape). Keep the
+    // invoke owner as ServerPlayer (the static/receiver type at the real call site,
+    // `this.player.absSnapTo(...)`, matching the original code's own owner choice for
+    // this same call before the rename) rather than Entity (where the method is
+    // actually declared) -- @At(INVOKE) matches the literal bytecode owner in the
+    // constant pool, which javac emits based on the receiver's static type, not the
+    // declaring class.
     @Inject(
         method = "handleAcceptTeleportPacket",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/server/level/ServerPlayer;absMoveTo(DDDFF)V"
+            target = "Lnet/minecraft/server/level/ServerPlayer;absSnapTo(DDDFF)V"
         )
     )
     private void onHandleAcceptTeleportPacket(
