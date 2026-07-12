@@ -8,6 +8,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -44,9 +45,15 @@ public class SelectDimensionScreen extends Screen {
         
         Consumer<DimEntryWidget> callback = w -> dimListWidget.setSelected(w);
         
+        // MC 26.1: AbstractSelectionList.children() now returns an unmodifiable
+        // view (same change already fixed in DimStackGuiController.java) -- build
+        // the whole widget list first, then hand it to the still-public
+        // replaceEntries(Collection) in one call instead of looping .add(...).
+        List<DimEntryWidget> widgets = new ArrayList<>(dimensionList.size());
         for (ResourceKey<Level> dim : dimensionList) {
-            dimListWidget.children().add(new DimEntryWidget(dim, dimListWidget, callback, new DimStackEntry(dim)));
+            widgets.add(new DimEntryWidget(dim, dimListWidget, callback, new DimStackEntry(dim)));
         }
+        dimListWidget.replaceEntries(widgets);
     
         confirmButton = (Button) addRenderableWidget(Button
             .builder(

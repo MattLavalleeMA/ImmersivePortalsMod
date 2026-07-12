@@ -13,6 +13,7 @@
     "common.MixinServerChunkCache",
     "common.MixinServerLevel",
     "common.chunk_sync.IEChunkMap_Accessor",
+    "common.chunk_sync.IEChunkMap_ExistingChunk",
     "common.chunk_sync.IEServerCommonPacketListenerImpl",
     "common.chunk_sync.MixinChunkHolder",
     "common.chunk_sync.MixinChunkMap_C",

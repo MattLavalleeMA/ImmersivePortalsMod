@@ -57,6 +57,8 @@ public class DimStackManagement {
     }
     
     private static boolean isDimStackEnabled() {
+        // Re-enabled (2026-07-12) for targeted diagnostic-logging repro of the
+        // Sodium "Global terrain uniforms have not been updated" crash.
         return true;
     }
     

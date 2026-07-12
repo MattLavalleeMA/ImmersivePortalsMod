@@ -62,6 +62,7 @@ import qouteall.imm_ptl.core.mc_utils.MyNbtTextFormatter;
 import qouteall.imm_ptl.core.mc_utils.ServerTaskList;
 import qouteall.imm_ptl.core.miscellaneous.IPVanillaCopy;
 import qouteall.imm_ptl.core.mixin.common.mc_util.IELevelEntityGetterAdapter;
+import qouteall.imm_ptl.core.mixin.common.chunk_sync.IEChunkMap_ExistingChunk;
 import qouteall.imm_ptl.core.platform_specific.O_O;
 import qouteall.imm_ptl.core.portal.Portal;
 import qouteall.q_misc_util.Helper;
@@ -421,7 +422,14 @@ public class McHelper {
      * {@link net.minecraft.world.level.chunk.storage.RegionFileStorage}
      * MC does not provide a clean interface to tell whether a chunk exists.
      * Only check whether the region file exists now.
+     * 
+     * @deprecated This is imprecise: the region file covers a 32x32 chunk area, so it can
+     * report a false positive when only a small, unrelated part of the region has ever been
+     * touched (e.g. by dim_stack's world-init setup near spawn). Prefer
+     * {@link #isChunkAreaAlreadyGenerated(ServerLevel, BlockPos, int)} which checks the
+     * specific chunks that matter without forcing generation.
      */
+    @Deprecated
     public static boolean getDoesRegionFileExist(ResourceKey<Level> toDimension, BlockPos toPos) {
         ChunkPos chunkPos = ChunkPos.containing(toPos);
         
@@ -431,6 +439,38 @@ public class McHelper {
             .resolve("r." + chunkPos.getRegionX() + "." + chunkPos.getRegionZ() + ".mca");
         
         return regionFilePath.toFile().exists();
+    }
+    
+    /**
+     * Checks whether any chunk in the square area of chunks centered on {@code centerPos}
+     * (with the given chunk radius) was actually already generated to "full" status,
+     * without forcing generation of any chunk. This is used to decide whether it's worth
+     * doing an expensive existing-frame search versus immediately generating a new frame.
+     * 
+     * Unlike {@link #getDoesRegionFileExist}, this checks the specific nearby chunks
+     * instead of the whole 32x32 chunk region file, so it isn't fooled by unrelated chunks
+     * elsewhere in the same region having been generated.
+     */
+    public static boolean isChunkAreaAlreadyGenerated(
+        ServerLevel world, BlockPos centerPos, int chunkRadius
+    ) {
+        ChunkMap chunkMap = world.getChunkSource().chunkMap;
+        IEChunkMap_ExistingChunk accessor = (IEChunkMap_ExistingChunk) chunkMap;
+        
+        ChunkPos centerChunkPos = ChunkPos.containing(centerPos);
+        
+        for (int dx = -chunkRadius; dx <= chunkRadius; dx++) {
+            for (int dz = -chunkRadius; dz <= chunkRadius; dz++) {
+                ChunkPos chunkPos = new ChunkPos(
+                    centerChunkPos.x() + dx, centerChunkPos.z() + dz
+                );
+                if (accessor.ip_isExistingChunkFull(chunkPos)) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
     }
     
     public static MutableComponent getLinkText(String link) {

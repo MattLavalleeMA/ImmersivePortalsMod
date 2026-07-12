@@ -155,7 +155,15 @@ public class NetherPortalGeneration {
             }
         };
         
-        boolean otherSideChunkAlreadyGenerated = McHelper.getDoesRegionFileExist(toDimension, toPos);
+        // Only checks a small neighborhood of chunks actually near the destination
+        // (cheap, no generation forced), rather than whether the whole 32x32-chunk region
+        // file exists. The whole-region check can false-positive when only some unrelated
+        // part of the region was previously touched (e.g. dim_stack's world-init setup
+        // near spawn), which would otherwise force an expensive wide-radius search/generation
+        // for a frame that was never actually there.
+        int nearbyCheckRadius = fromShape.getShapeInnerLength() < 16 ? 1 : 2;
+        boolean otherSideChunkAlreadyGenerated =
+            McHelper.isChunkAreaAlreadyGenerated(toWorld, toPos, nearbyCheckRadius);
         
         int frameSearchingRadius = Math.floorDiv(existingFrameSearchingRadius, 16) + 1;
         
@@ -171,7 +179,7 @@ public class NetherPortalGeneration {
          */
         int loaderRadius = otherSideChunkAlreadyGenerated ?
             frameSearchingRadius :
-            (fromShape.getShapeInnerLength() < 16 ? 1 : 2);
+            nearbyCheckRadius;
         ChunkLoader chunkLoader = new ChunkLoader(
             new DimensionalChunkPos(toDimension, ChunkPos.containing(toPos)), loaderRadius
         );

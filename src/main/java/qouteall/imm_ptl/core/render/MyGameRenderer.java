@@ -47,6 +47,7 @@ import qouteall.imm_ptl.core.render.context_management.DimensionRenderHelper;
 import qouteall.imm_ptl.core.render.context_management.PortalRendering;
 import qouteall.imm_ptl.core.render.context_management.RenderStates;
 import qouteall.imm_ptl.core.render.context_management.WorldRenderInfo;
+import qouteall.q_misc_util.Helper;
 import qouteall.q_misc_util.my_util.LimitedLogger;
 
 import java.util.Stack;
@@ -70,6 +71,10 @@ public class MyGameRenderer {
     public static int vanillaTerrainSetupOverride = 0;
     
     public static boolean enablePortalCaveCulling = true;
+    
+    // TEMP DIAGNOSTIC (2026-07-12): tracing the Sodium "Global terrain uniforms have
+    // not been updated" crash. Remove once root-caused/fixed.
+    public static int portalRenderDepth = 0;
     
     public static void init() {
         IPCGlobal.CLIENT_CLEANUP_EVENT.register(() -> {
@@ -132,6 +137,11 @@ public class MyGameRenderer {
         }
         
         ResourceKey<Level> newDimension = newWorld.dimension();
+        
+        Helper.log("[SODIUM-DIAG] enter switchAndRenderTheWorld from=" +
+            client.level.dimension().identifier() + " to=" + newDimension.identifier() +
+            " depth=" + portalRenderDepth);
+        portalRenderDepth++;
         
         LevelRenderer worldRenderer = ClientWorldLoader.getWorldRenderer(newDimension);
         
@@ -317,6 +327,11 @@ public class MyGameRenderer {
         CHelper.checkGlError();
         
         client.smartCull = true;
+        
+        portalRenderDepth--;
+        Helper.log("[SODIUM-DIAG] exit switchAndRenderTheWorld dim=" +
+            newDimension.identifier() + " backTo=" + oldWorld.dimension().identifier() +
+            " depth=" + portalRenderDepth);
     }
     
     /**

@@ -188,8 +188,20 @@ public class DimStackScreen extends Screen {
             ),
             GuiHelper.blankSpace(5),
             new GuiHelper.LayoutElement(false, 1, (from, to) -> {
-                dimListWidget.setSize(width, to - from);
-                dimListWidget.setPosition(0, from);
+                // MC 26.1: plain setSize()/setPosition() (inherited AbstractWidget
+                // field setters) don't reposition entries already added to the list
+                // (e.g. via DimStackGuiController.initializeAsDefault(), which runs
+                // while this screen is still being pre-built off-screen, before its
+                // real width/height/position are known) -- AbstractSelectionList's
+                // own public updateSizeAndPosition(width, height, x, y) does resize
+                // + reposition + repositionEntries() + refreshScrollAmount() all
+                // together, which is what's actually needed here. Using the two raw
+                // setters left already-added rows positioned using the screen's
+                // stale pre-init bounds until the user manually scrolled (which
+                // calls setScrollAmount(), the only other path that repositions
+                // entries) -- confirmed as the cause of the dim_stack list
+                // appearing mispositioned on first open.
+                dimListWidget.updateSizeAndPosition(width, to - from, 0, from);
             }),
             GuiHelper.blankSpace(5),
             new GuiHelper.LayoutElement(true, 20, (from, to) -> {
