@@ -1,7 +1,7 @@
 {
   "required": true,
   "package": "qouteall.imm_ptl.core.mixin",
-  "compatibilityLevel": "JAVA_17",
+  "compatibilityLevel": "JAVA_21",
   "plugin": "qouteall.imm_ptl.core.IPMixinPlugin",
   "mixins": [
     "common.MixinClipContext",
@@ -101,6 +101,7 @@
     "client.render.MixinBlockEntityRenderDispatcher",
     "client.render.MixinCamera",
     "client.render.MixinEntityRenderDispatcher",
+    "client.render.MixinEntityRenderState",
     "client.render.MixinFrustum_FixDeadLoop",
     "client.render.MixinGameRenderer",
     "client.render.MixinGlStateManager",

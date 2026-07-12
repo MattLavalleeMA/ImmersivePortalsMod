@@ -1,7 +1,6 @@
 package qouteall.imm_ptl.core.mixin.client.render;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.ViewArea;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
@@ -17,7 +16,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import qouteall.imm_ptl.core.render.FrontClipping;
 import qouteall.imm_ptl.core.render.context_management.PortalRendering;
 import qouteall.imm_ptl.core.render.context_management.RenderStates;
-import qouteall.imm_ptl.core.render.context_management.WorldRenderInfo;
 
 // avoid crashing with sodium
 // the overwrite has priority of 1000
@@ -40,8 +38,14 @@ public class MixinLevelRenderer_Optional {
     
     //the camera position is used for translucent sort
     //avoid messing it
+    // MC 26.1: LevelRenderer.setupRender(Camera,Frustum,boolean,boolean) is fully removed;
+    // its chunk-builder-camera-position call now lives in the private
+    // cullTerrain(Camera,Frustum,boolean) method instead (confirmed via decompiled source:
+    // `this.sectionRenderDispatcher.setCameraPosition(cameraPos);`). Re-anchored there --
+    // same target call site (SectionRenderDispatcher.setCameraPosition(Vec3)), just a
+    // different (real) enclosing method name.
     @Redirect(
-        method = "Lnet/minecraft/client/renderer/LevelRenderer;setupRender(Lnet/minecraft/client/Camera;Lnet/minecraft/client/renderer/culling/Frustum;ZZ)V",
+        method = "cullTerrain",
         at = @At(
             value = "INVOKE",
             target = "Lnet/minecraft/client/renderer/chunk/SectionRenderDispatcher;setCameraPosition(Lnet/minecraft/world/phys/Vec3;)V"
@@ -63,42 +67,16 @@ public class MixinLevelRenderer_Optional {
     // itself was removed) - the clip-plane-uniform mechanism this drove is stubbed
     // (see FrontClipping's class-level TODO), so this hook is no longer needed.
     
-    // correct the position of updating ViewArea
-    @Redirect(
-        method = "setupRender",
-        at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;getX()D"),
-        require = 0
-    )
-    private double redirectGetXInSetupRender(LocalPlayer player) {
-        if (WorldRenderInfo.isRendering()) {
-            return WorldRenderInfo.getCameraPos().x;
-        }
-        return player.getX();
-    }
-    
-    // biolerplate
-    @Redirect(
-        method = "setupRender",
-        at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;getY()D"),
-        require = 0
-    )
-    private double redirectGetYInSetupRender(LocalPlayer player) {
-        if (WorldRenderInfo.isRendering()) {
-            return WorldRenderInfo.getCameraPos().y;
-        }
-        return player.getY();
-    }
-    
-    // biolerplate
-    @Redirect(
-        method = "setupRender",
-        at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;getZ()D"),
-        require = 0
-    )
-    private double redirectGetZInSetupRender(LocalPlayer player) {
-        if (WorldRenderInfo.isRendering()) {
-            return WorldRenderInfo.getCameraPos().z;
-        }
-        return player.getZ();
-    }
+    // MC 26.1: LocalPlayer.getX()/getY()/getZ() are no longer called from setupRender (fully
+    // removed) or from its replacement cullTerrain/scheduleTranslucentSectionResort --
+    // confirmed via decompiled source, the camera position now flows uniformly as
+    // `camera.position()` (a single Vec3, not separate getX/getY/getZ reads) into
+    // cullTerrain -> scheduleTranslucentSectionResort(camera.position()). That position is
+    // already corrected for portal rendering earlier, directly on the Camera itself: see
+    // MixinCamera.onUpdateFinished's `WorldRenderInfo.adjustCameraPos(this_)`, which mutates
+    // Camera's own `position` field at the end of every Camera.update(...) -- before
+    // cullTerrain ever reads it. These three redirects are therefore redundant with an
+    // already-working fix elsewhere, not broken/needing a replacement; removed rather than
+    // kept as dead weight targeting a fully nonexistent call site.
 }
+

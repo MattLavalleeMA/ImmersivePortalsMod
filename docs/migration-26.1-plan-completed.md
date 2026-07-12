@@ -1412,6 +1412,71 @@ static state to swap in the first place.
     `FogRendererContext.onPlayerTeleport(from, to)` call (with the now-unused
     `FogRendererContext` import removed from that file too).
 
+## `MixinDebugRenderer.java`'s portal wand marker rendering reconnected — implemented, weave-time unverified
+
+**Re-anchored to `LevelRenderer`'s synthetic `lambda$addMainPass$0` method,
+replicating a real, currently-shipping mod's own solution for our exact MC
+version rather than guessing.** Searched GitHub for other maintained mods
+already solving the same "inject custom `PoseStack`/`MultiBufferSource`-based
+drawing into the main render pass" problem on this MC version family:
+
+- [MeteorDevelopment/meteor-client](https://github.com/MeteorDevelopment/meteor-client)
+  targets **MC 26.1.2 — an exact version match** — and ships a working
+  `@Inject(method = "lambda$addMainPass$0", ...)`, confirming the synthetic
+  method name is real and weave-stable on our own MC version (not just a
+  `javap`-visible guess).
+- [Vivecraft/VivecraftMod](https://github.com/Vivecraft/VivecraftMod)'s default
+  branch (MC 26.2) hooks a real, stably-named, non-synthetic method instead:
+  `@Inject(method = "submitFeatures", at = @At(value = "INVOKE", target =
+  "Lnet/minecraft/client/renderer/LevelRenderer;finalizeGizmoCollection()V"))`.
+  Checking a decompiled MC 26.1.1 source (`brebathe/Eaglercraft-26-1-1-src`,
+  structurally identical to our 26.1.2) confirmed `submitFeatures` is **not** a
+  real method there — it's still a `profiler.popPush("submitFeatures")` label
+  inlined inside `addMainPass`'s lambda, so that hook is 26.2-only and doesn't
+  apply to us. Vivecraft also maintains a `Multiloader-26.1` branch (MC
+  26.1.2, exact match) where the same `LevelRendererVRMixin.java` does **not**
+  use `submitFeatures` at all — it falls back to
+  `lambda$addMainPass$0`/`lambda$addMainPass$0*`, independently landing on the
+  same synthetic-lambda anchor. This is the strongest available real-world
+  confirmation short of our own launch: the same mod, targeting our exact
+  version, solving the identical problem the same way.
+- The Vivecraft 26.1 branch's own `@At` patterns inside that lambda
+  (`@At(value = "CONSTANT", args = "stringValue=renderSolidFeatures")`,
+  `@At("TAIL")`, `@At(value = "INVOKE", target = "...endOutlineBatch()V",
+  shift = Shift.AFTER)`, etc., with `PoseStack poseStack` and
+  `LevelRenderState levelRenderState` captured via MixinExtras `@Local`/
+  `@Local(argsOnly = true)`) were used as the direct template for our own hook.
+
+**Implementation** (`MixinDebugRenderer.java`, `peripheral.mixin.client
+.portal_wand` package, now `@Mixin(LevelRenderer.class)` instead of
+`DebugRenderer.class`): injects at
+`@Inject(method = "lambda$addMainPass$0*", at = @At(value = "CONSTANT", args =
+"stringValue=renderSolidFeatures"))`, capturing `LevelRenderState
+levelRenderState` (`@Local(argsOnly = true)` — a genuine parameter of the
+synthetic lambda method, since captured effectively-final locals become real
+parameters of the generated method at the bytecode level), `PoseStack
+poseStack`, and `MultiBufferSource.BufferSource bufferSource`
+(`@Local(ordinal = 0)`, needed to disambiguate from the sibling
+`crumblingBufferSource` local of the same type also in scope). The injected
+handler checks `Minecraft.getInstance().player`'s main-hand item against
+`PortalWandItem.instance` (same check pattern already used elsewhere in
+`PortalWandItem`/`PortalWandInteraction`) and, if held, calls the completely
+unmodified `PortalWandItem.clientRender(player, itemStack, poseStack,
+bufferSource, cameraPos.x, cameraPos.y, cameraPos.z)` using
+`levelRenderState.cameraRenderState.pos` for the camera position — the exact
+same call contract the old (now-removed) `DebugRenderer.render(...)` hook
+used, so `PortalWandItem`/`ClientPortalWandPortalCreation`/`Drag`/`Copy`/
+`WireRenderingHelper` needed **zero** changes; only the injection anchor
+changed. Verified via `parse_compile_errors.py --run`: 0 errors.
+
+**Not yet verified:** whether `lambda$addMainPass$0*`'s wildcard actually
+resolves at Mixin weave time, and whether the `CONSTANT("renderSolidFeatures")`
+slice/`ordinal = 0` for `bufferSource` are exactly right, can only be confirmed
+by an actual game launch (per the established pattern throughout this
+migration — `compileJava` never validates Mixin's string-based targets). If
+weaving fails, Mixin's own error output will list the real available targets,
+which is expected to make correcting this fast.
+
 **The actual render-time fog switch, in `MyGameRenderer.switchAndRenderTheWorld`
 — confirmed via decompiled source, not a guess.** Tracing the real call chain
 (`GameRenderer.render()` → private `extractCamera(...)` → `this.fogRenderer
@@ -1488,6 +1553,347 @@ like its sibling fix above, this was never a compile error (Mixin string
 targets aren't compile-checked), only a weave-time-crash risk, now eliminated.
 Not yet verified against a real game launch (tracked under "Next steps" in the
 main plan doc, same as the rest of the fog-rendering redesign work).
+
+## `MixinLevelRenderer.java`'s `redirectRenderEntity` weave-crash risk fixed — implemented, weave-time unverified
+
+**Found via the same GitHub-research technique used for `MixinDebugRenderer.java`,
+but applied to audit this mod's own existing mixins rather than to find a
+replacement pattern.** While surveying other mods' `LevelRenderer` mixins for
+patterns to reuse elsewhere, none of MeteorDevelopment/meteor-client's,
+CaffeineMC/sodium's, or Vivecraft/VivecraftMod's own `LevelRenderer` mixins
+touch a method called `renderEntity` at all — they all wrap
+`submitEntities`/`EntityRenderDispatcher.submit(...)` instead. That prompted a
+direct check: searching the decompiled MC 26.2 source for `renderEntity(Entity`
+turned up **zero matches**. `LevelRenderer.renderEntity(Entity, double, double,
+double, float, PoseStack, MultiBufferSource)` is fully removed — entity
+rendering is now always extract-then-submit
+(`EntityRenderDispatcher.extractEntity`/`.submit(...)`, confirmed via
+decompiled `EntityRenderDispatcher.java`).
+
+This affected **two** real weave-time-crash risks in `MixinLevelRenderer.java`,
+both targeting the same removed method (the same "one broken target, check for
+siblings" lesson from the `MixinFogRenderer`/`MixinFogRenderer_A_CVB` pair
+earlier this session):
+
+- `@Shadow protected abstract void renderEntity(...)` — a `@Shadow` for a
+  member that no longer exists also fails at weave time, same as an invalid
+  `@Inject`/`@Redirect` target.
+- `@Redirect(method = "renderLevel", at = @At(value = "INVOKE", target =
+  "Lnet/minecraft/client/renderer/LevelRenderer;renderEntity(...)"))` — the
+  `redirectRenderEntity` handler that used the `@Shadow` above to call through
+  to vanilla after running `CrossPortalEntityRenderer.beforeRenderingEntity`/
+  `afterRenderingEntity` around each entity.
+
+**Fix:** both removed; replaced with two new hooks targeting real, stably-named,
+non-synthetic methods (no `lambda$addMainPass$0`-style re-anchoring needed
+here, unlike most of this file's other disabled hooks):
+
+- A new duck, `IEEntityRenderState` (`ip_getEntity()`/`ip_setEntity(Entity)`),
+  implemented by a new `MixinEntityRenderState` (`@Mixin(EntityRenderState
+  .class)`, registered in `imm_ptl.mixins.json`). Vanilla's `EntityRenderState`
+  has no back-reference to the source `Entity` it was extracted from (it never
+  needed one before), but `CrossPortalEntityRenderer.beforeRenderingEntity`/
+  `afterRenderingEntity` need the real `Entity` (they key a
+  `WeakHashMap<Entity, ...>` and read an `IEEntity` duck off it). This is the
+  same technique MeteorDevelopment/meteor-client uses for the identical
+  problem (its own `IEntityRenderState.meteor$getEntity()` duck, confirmed in
+  its `LevelRendererMixin.draw(...)`).
+- `@Inject(method = "extractEntity", at = @At("RETURN"))` in
+  `MixinLevelRenderer.java` stashes the `Entity` onto the returned
+  `EntityRenderState` via that duck. `extractEntity` is `LevelRenderer`'s own
+  private one-line wrapper around `EntityRenderDispatcher.extractEntity(...)`
+  (confirmed via decompiled source) — a real, stable, directly-injectable
+  method, not a lambda.
+- `@Redirect(method = "submitEntities", at = @At(value = "INVOKE", target =
+  "Lnet/minecraft/client/renderer/entity/EntityRenderDispatcher;submit(...)"))`
+  (`redirectSubmitEntity`) replaces `redirectRenderEntity`: retrieves the
+  `Entity` via the new duck, calls `beforeRenderingEntity`/
+  `afterRenderingEntity` around the real `dispatcher.submit(...)` call.
+  `submitEntities` is also a real, stably-named, non-synthetic private method
+  (confirmed via decompiled source) called once per entity from a plain
+  `for` loop — same effect as before (once per entity, wrapped), just anchored
+  to the new dispatch shape.
+
+**A third, deeper issue found in the same sweep, deliberately stubbed rather
+than guessed at:** `IEWorldRenderer.ip_myRenderEntity(...)` (used by
+`CrossPortalEntityRenderer.renderEntityProjections` to immediately draw a
+single entity's cross-portal "projection" at a transformed position) also
+called the removed `renderEntity(...)`, but unlike the redirect above, it
+can't simply be re-anchored: `EntityRenderDispatcher.submit(...)` now only
+*queues* a submission into a `SubmitNodeCollector` (confirmed via decompiled
+source — no more synchronous immediate-draw path exists at all). Actually
+executing a queued submission requires the shared `FeatureRenderDispatcher`/
+`SubmitNodeStorage` (e.g. `FeatureRenderDispatcher.prepareFrame(...)
+.executeSolid()`/`.executeTranslucent()`, the pattern
+Vivecraft/VivecraftMod's own `vivecraft$renderGizmos()` uses) — reusing the
+main frame's shared dispatcher/storage for this one-off nested render risks
+colliding with whatever submission the main frame already has in flight
+(double-submission, premature clearing, etc.). This is a real redesign, not a
+rename, and one that needs an actual game launch to verify rather than
+guessing blind — consistent with how every other genuinely-uncertain
+render-pipeline change has been handled this migration. Stubbed to a no-op:
+entity projections through portals simply won't render for now (a visual
+regression only, not a crash).
+
+Verified via `parse_compile_errors.py --run`: 0 errors. Not yet verified
+against a real game launch, same as every other Mixin string-target change
+this migration.
+
+## `MixinSodiumOcclusionCuller.java` investigated — not a quick fix, real redesign needed
+
+Checked while surveying whether other stubbed/TODO items could be resolved via
+the same GitHub-research technique used for `MixinDebugRenderer.java`. Fetched
+Sodium's actual source at the exact-version-matching tag `mc26.1.2-0.9.1`
+(`CaffeineMC/sodium`). The new `OcclusionCuller.findVisible(...)` signature
+this file's existing TODO comment already described (three separate visitor
+types — `GraphOcclusionVisitor` ×2, `VisibilityTestingVisitor` — plus a
+`CancellationToken`, no single `useOcclusionCulling` override flag) is
+confirmed correct. But the bigger picture is worse than a rename: Sodium's
+whole chunk-culling pipeline is now **asynchronous and tree-based**
+(`RenderSectionManager` schedules a `CullTask` on a dedicated background
+thread via `scheduleAsyncWork(...)`; results are cached per `CullType` as
+`SectionTree`s and consumed later by `finalizeRenderLists(...)`/
+`readRenderListFromTree(...)`). The old assumption behind this mod's
+portal-cave-culling override — synchronously redirecting the culling
+iteration's start point to the portal's visible-section origin — doesn't map
+cleanly onto this async model at all; there's no single synchronous call site
+left to redirect. This needs genuine new design work against the async
+pipeline (or an explicit decision to keep behaving like vanilla Sodium's own
+culling through portals, a performance-only regression per the existing stub's
+comment), not a quick GitHub-research-informed fix like `MixinDebugRenderer
+.java`'s was. Left stubbed as-is; not attempted this round.
+
+## `setupRender`-targeting hooks re-verified and fixed — done
+
+**Found while reviewing the main plan's "Remaining items in this cluster" list
+for leads.** Re-reading `MixinLevelRenderer.java`/`MixinLevelRenderer_Optional
+.java` in full (prompted by the `redirectRenderEntity` fix earlier turning up a
+sibling bug) surfaced several more active mixins targeting `LevelRenderer
+.setupRender(Camera,Frustum,boolean,boolean)`, confirmed via decompiled MC 26.2
+source to be **fully removed** (zero matches anywhere in the decompiled repo)
+— consistent with the TODO already tracked in `MixinLevelRenderer_Optional
+.java`, but these particular hooks were still live (not yet stubbed):
+
+- **`modifyIsSpectator`** (`MixinLevelRenderer.java`, `@ModifyVariable`,
+  default `require = 1`) — a genuine weave-crash risk, since `setupRender`
+  doesn't exist at all. Fixed: `setupRender`'s spectator-based smart-cull-disable
+  logic now lives in the private `cullTerrain(Camera, Frustum, boolean
+  spectator)` method (confirmed via decompiled source: `if (spectator &&
+  ...isSolidRender()) smartCull = false;`, called from `update(Camera)` as
+  `cullTerrain(camera, camera.getCullFrustum(),
+  minecraft.player.isSpectator())`). Re-anchored to `cullTerrain`'s own single
+  boolean parameter (`ordinal = 0`).
+- **`onSetChunkBuilderCameraPosition`** (`MixinLevelRenderer_Optional.java`,
+  `@Redirect`, `require = 0` — so not a hard crash, just a silently-inactive
+  feature) — same `setupRender` target. Fixed: `cullTerrain` directly calls
+  `this.sectionRenderDispatcher.setCameraPosition(cameraPos);` (confirmed via
+  decompiled source), so re-anchored `method` to `cullTerrain` with the exact
+  same `@At(INVOKE)` target (`SectionRenderDispatcher.setCameraPosition(Vec3)`)
+  unchanged.
+- **`redirectGetXInSetupRender`/`redirectGetYInSetupRender`/
+  `redirectGetZInSetupRender`** (`MixinLevelRenderer_Optional.java`, all
+  `@Redirect`, `require = 0`) — investigated and found to be **redundant, not
+  broken**: `LocalPlayer.getX()/getY()/getZ()` are no longer called anywhere
+  near this code path at all (confirmed via decompiled source — camera
+  position now flows uniformly as a single `camera.position()` `Vec3` into
+  `cullTerrain` → `scheduleTranslucentSectionResort(camera.position())`, never
+  as separate coordinate reads). That position is already corrected for portal
+  rendering earlier and separately, directly on `Camera` itself:
+  `MixinCamera.onUpdateFinished`'s `WorldRenderInfo.adjustCameraPos(this_)`
+  mutates `Camera`'s own `position` field at the end of every `Camera
+  .update(...)`, well before `cullTerrain` ever reads it (confirmed already
+  fixed and working — see `MixinCamera.java` weave-time-only fix earlier in
+  this log). These three redirects were therefore doing nothing useful even
+  when `setupRender` existed on this exact call path; removed outright rather
+  than kept as dead weight pointed at a nonexistent method.
+- **`redirectTranslucentFramebuffer`** (`MixinLevelRenderer.java`, `@Redirect`
+  on a `FIELD` read, default `require = 1`) and its backing `@Shadow @Nullable
+  private RenderTarget translucentTarget;` — both real weave-crash risks,
+  since the `translucentTarget` field is fully removed (translucent rendering
+  now goes through a `FrameGraphBuilder`-managed `LevelTargetBundle`,
+  `this.targets.translucent`). Fixed with a more precise mechanism than a
+  field redirect: vanilla itself exposes a real public getter,
+  `getTranslucentTarget()` (confirmed via decompiled source: `public
+  RenderTarget getTranslucentTarget() { return this.targets.translucent !=
+  null ? this.targets.translucent.get() : null; }`, also used by vanilla's own
+  `ChunkSectionLayerGroup`) — re-anchored to `@Inject(method =
+  "getTranslucentTarget", at = @At("HEAD"), cancellable = true)`, returning
+  `null` during portal rendering. This is arguably an improvement over the old
+  approach: it intercepts every caller of the getter, not just one read site
+  that used to be inline in `renderLevel`'s own body.
+- **`redirectRunQueuedChunkUpdates`** (`MixinLevelRenderer.java`, `@Redirect`,
+  default `require = 1`) — targeted `ClientLevel.pollLightUpdates()` being
+  called from within `renderLevel`, wrapping it in
+  `ClientWorldLoader.withSwitchedWorld(...)` since this mod calls `renderLevel`
+  repeatedly per frame for different dimensions. Confirmed via decompiled
+  source that `pollLightUpdates()` is **no longer called from `renderLevel` at
+  all** — it moved entirely into `ClientLevel`'s own per-tick `update()`
+  method (`populateLightUpdates`/`runLightUpdates` profiler sections),
+  decoupled from this mod's per-dimension render calls. Since the original
+  problem this redirect solved (the "wrong world" context during a
+  per-dimension `renderLevel` call) no longer applies to a call site that
+  isn't reached from `renderLevel` anymore, removed outright rather than
+  guessed at a new home for it — flagged for real-launch verification in case
+  light updates in non-primary rendered dimensions need different handling
+  some other way now.
+- **`onIsChunkCompiled`** (`MixinLevelRenderer.java`, `@Inject`, default
+  `require = 1`) — targeted `isSectionCompiled(BlockPos)`, confirmed via
+  decompiled source (and its call site in `extractVisibleEntities`) to have
+  been simply **renamed** to `isSectionCompiledAndVisible(BlockPos)` — same
+  method body/semantics. Retargeted, no other changes needed.
+
+Also investigated: whether [IrisShaders/Iris](https://github.com/IrisShaders/Iris)'s
+own `26.1` branch (exact version match) has already solved
+`IPIrisHelper.java`'s framebuffer-copy problem
+(`RenderTarget.frameBufferId`/`getColorTextureId()`/`getDepthTextureId()` all
+removed, real replacement is `CommandEncoder.copyTextureToTexture(...)`) —
+searched Iris's source for `copyTextureToTexture` and found no matches, so
+unlike `MixinDebugRenderer.java`/`MixinLevelRenderer.java`'s fixes above, there
+was no quick externally-sourced lead to act on here. Left stubbed; still real
+design/testing work, same as the rest of the Iris-compatibility renderer stack
+and the broader stencil-masking redesign it depends on.
+
+Verified via `parse_compile_errors.py --run`: 0 errors after every change in
+this round, including removal of now-unused `LocalPlayer`/`WorldRenderInfo`
+imports in `MixinLevelRenderer_Optional.java`. Not yet verified against a real
+game launch, same as every other Mixin string-target change this migration.
+
+## `MixinLevelRenderer.java`'s ~8 disabled hooks re-anchored — implemented, weave-time unverified
+
+**Recovered the actual pre-migration hook implementations from git history**
+(`git show 6831a3a7:...MixinLevelRenderer.java`, the last pre-26.1 commit)
+rather than guessing from the file-level TODO comment's summary alone — this
+gave exact original logic to port instead of reconstructing it from
+descriptions. Re-anchored each against real, decompiled-source-confirmed
+targets in the current MC 26.1.2 render pipeline:
+
+- **`onBeginRenderingEntitiesAndBlockEntities`** (old anchor:
+  `DimensionSpecialEffects.constantAmbientLight()`, confirmed fully removed) —
+  re-anchored to `@Inject(method = "submitEntities", at = @At("HEAD"))`, a
+  real, stable, non-synthetic method that begins the bulk entity-rendering
+  pass. Uses `RenderSystem.getModelViewMatrix()` for the model-view matrix
+  (see version-mismatch note below).
+- **`onEndRenderingEntities`** (old anchor: an `endLastBatch()`-ordinal-1
+  landmark) — entities/block entities are only *submitted* (queued) by
+  `submitEntities`/`submitBlockEntities` now; the actual GPU draw happens
+  later in the same `lambda$addMainPass$0` frame pass via
+  `featureRenderDispatcher.renderSolidFeatures()` (confirmed via decompiled
+  source). Re-anchored to `@Inject(method = "lambda$addMainPass$0*", at =
+  @At(value = "INVOKE", target =
+  "...FeatureRenderDispatcher;renderSolidFeatures()V", shift = At.Shift.AFTER))`,
+  capturing the lambda's own `PoseStack poseStack` local via MixinExtras
+  `@Local`.
+- **`onMyBeforeTranslucentRendering`** (old anchor:
+  `Sheets.translucentItemSheet()`) — re-anchored to
+  `ChunkSectionsToRender.renderGroup(ChunkSectionLayerGroup, GpuSampler)`
+  ordinal 1 (the translucent-group call; ordinal 0 is opaque, confirmed via
+  decompiled source — this method is called exactly twice per frame).
+- **`onBeforeRenderingLayer`/`onAfterRenderingLayer`** (old anchor: the
+  per-layer `LevelRenderer.renderSectionLayer(RenderType,...)` call, which used
+  to fire once per fine-grained render layer in a loop) — re-anchored to the
+  same `ChunkSectionsToRender.renderGroup(...)` call, this time with no
+  `ordinal` specified (deliberately matching both the opaque and translucent
+  occurrences), preserving the original "before/after any render layer"
+  semantics despite there now being two coarser calls instead of many
+  fine-grained ones.
+- **`redirectClearing`** (old anchor: `RenderSystem.clear(int)`, confirmed no
+  longer called anywhere near this pass) — the "clear" `FramePass` now clears
+  via `CommandEncoder.clearColorAndDepthTextures(GpuTexture, int, GpuTexture,
+  double)` instead (confirmed via decompiled source). Re-anchored to a
+  `@Redirect` on that call within `"lambda$renderLevel$0*"`. **Lower
+  confidence than the other hooks in this round**: this "clear" pass's
+  `executes(...)` lambda is written directly inline in `renderLevel`'s own
+  body (not inside a dedicated named helper method like `addMainPass`/
+  `addWeatherPass` are) and appears to be the only lambda literal there, so
+  `lambda$renderLevel$0` is a reasoned guess (first/only lambda in that
+  method's source) rather than cross-confirmed via another mod's mixin the way
+  the others in this round are.
+- **`beforeRenderingWeather`/`afterRenderingWeather`** (old anchor: the lambda
+  in `addWeatherPass`) — re-anchored to `"lambda$addWeatherPass$0*"`, same
+  confidence level as the `addMainPass` hooks since `addWeatherPass` is its
+  own dedicated private method (confirmed via decompiled source), so its
+  lambda is unambiguous.
+- **`onFinishRenderLevel`** (old anchor: `renderLevel`'s own `RETURN`, which is
+  still a real, stable method — just a different parameter list now) — no
+  re-anchoring needed for the target itself, but its body
+  (`Lighting.setupLevel()`) needed updating: `Lighting` was redesigned from
+  static methods to an `AutoCloseable` instance earlier this migration (see
+  the `ClientWorldLoader`/`MixinLevelRenderer` changelog round above), so this
+  now calls `minecraft.gameRenderer.getLighting()
+  .updateLevel(CardinalLighting.Type.DEFAULT)` instead — the direct
+  `CardinalLighting.Type.DEFAULT` equivalent of the old unconditional
+  `Lighting.setupLevel()` call's "make hand rendering normal again" intent.
+
+**Not re-anchored — left as genuinely open design work:** the old
+`onSetupTerrainBegin`/`onSetupTerrainEnd` terrain-visibility override (via
+`VisibleSectionDiscovery.discoverVisibleSections`, replacing vanilla's own
+frustum culling during portal rendering for correctness). Its old anchor,
+`setupRender`, is confirmed fully removed; its structural replacement,
+`cullTerrain(Camera, Frustum, boolean)`, is built around a fundamentally
+different `SectionOcclusionGraph`-based algorithm with persistent per-frame
+traversal state, not a one-shot linear setup the old override can be ported
+onto by a simple re-anchor. This is real, dedicated redesign work, not a
+rename — left unimplemented rather than guessed at.
+
+**A real mistake caught by the compiler, not by review:** the first pass at
+this fix used `RenderSystem.getModelViewMatrixCopy()` throughout, sourced from
+the `Renekovski/26.2-mcp` decompile used elsewhere this session — but that
+repo is MC **26.2**, one version ahead of this mod's 26.1.2 target.
+`getModelViewMatrixCopy()` doesn't exist on 26.1.x at all (9 compile errors
+surfaced this immediately); a direct check against a decompiled **26.1.1**
+source (`brebathe/Eaglercraft-26-1-1-src`, exact version match) confirmed the
+real, still-current name on our version is `RenderSystem.getModelViewMatrix()`
+(unrenamed). Also caught: `Lighting.setupLevel()` doesn't exist either (2 more
+compile errors) — already known and already fixed elsewhere in this migration,
+just not cross-referenced before writing this round's first draft. Both fixed;
+see the version-mismatch lesson recorded for future rounds.
+
+Verified via `parse_compile_errors.py --run`: 0 errors after every change.
+Not yet verified against a real game launch — per the established pattern,
+`compileJava` cannot validate Mixin's string-based targets (method names,
+`@At` slices, lambda indices), so weave-time correctness for all of the above
+(especially `redirectClearing`'s lower-confidence lambda index guess) remains
+to be confirmed by an actual launch.
+
+## Small leftover items fixed — done
+
+**`src/main/resources/fabric.mod.json`:**
+- `"minecraft": ["1.21", "1.21.1"]` → `"26.1.x"` (matches
+  `gradle.properties`' `minecraft_version=26.1.2`, and the same range-string
+  convention `Vivecraft/VivecraftMod`'s own `fabric_mc_range=["26.1.x"]` uses).
+- `"fabricloader": ">=0.7.4"` → `">=0.19.3"` (matches `gradle.properties`'
+  `loader_version=0.19.3`) — noticed while fixing the explicitly-flagged
+  `fabric-api` floor below; this one was even more stale and just as wrong, so
+  fixed alongside it rather than left as a second pass.
+- `"fabric-api": ">=0.109.0"` → `">=0.154.2"` (matches `gradle.properties`'
+  `fabric_version=0.154.2+26.1.2`).
+- `"iris"`/`"sodium"` `breaks` ranges — `["<1.8.0", ">1.8.0"]`/`["<0.6.0",
+  ">0.6.0"]` → `["<1.11.2", ">1.11.2"]`/`["<0.9.1", ">0.9.1"]`, matching the
+  exact versions this project's own `gradle.properties` builds/tests against
+  (`iris_path=...iris:1.11.2+26.1-fabric`,
+  `sodium_path=...sodium:mc26.1.2-0.9.1-fabric`) — same "breaks below and
+  above the one known-good version" pattern as before, just updated numbers.
+
+**All 5 `*.mixins.json` files' `"compatibilityLevel": "JAVA_17"`:** bumped to
+`"JAVA_21"`. Checked what real mods on this exact MC version actually declare
+rather than guessing: 
+[MeteorDevelopment/meteor-client](https://github.com/MeteorDevelopment/meteor-client)
+(MC 26.1.2, exact version match) uses `"JAVA_21"` across all of its own mixin
+configs. Interestingly,
+[Vivecraft/VivecraftMod](https://github.com/Vivecraft/VivecraftMod) and
+[CaffeineMC/sodium](https://github.com/CaffeineMC/sodium) (both MC 26.1.x/26.2)
+still declare `"JAVA_17"` everywhere despite also building with Java 21+/25 —
+`compatibilityLevel` evidently doesn't need to track the project's own JDK
+toolchain version, it only needs to be high enough for whatever Mixin
+bytecode-level features are actually used. Went with `"JAVA_21"` (matching the
+one mod that's on our exact MC version) as a reasonable, precedent-backed
+alignment with this project's `sourceCompatibility = JavaVersion.VERSION_25`,
+rather than leaving the pre-26.1-migration-era `"JAVA_17"` unexamined. Like
+`compatibilityLevel` itself, this is a weave-time-only setting `compileJava`
+doesn't validate — not yet confirmed against a real launch, though the `JAVA_21`
+value is real-world-precedented on our exact MC version, so risk is low.
+
+Verified via `parse_compile_errors.py --run`: 0 errors.
 
 
 

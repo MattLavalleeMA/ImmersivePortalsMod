@@ -89,43 +89,28 @@ state at all** (`DepthStencilState` is baked into a `RenderPipeline` at build ti
 `.clear()`/`.frameBufferId`/`.getColorTextureId()` are all gone — only
 `GpuTexture`/`GpuTextureView` objects remain, cleared via
 `RenderSystem.getDevice().createCommandEncoder().clearColorAndDepthTextures(...)`).
-Confirmed against **real decompiled MC 26.1.2 source** (extracted directly from the
-sibling `*-sources.jar` next to the merged jar in `.gradle/loom-cache/minecraftMaven` —
-cheaper than `genSourcesWithVineflower` for single classes, see Tooling section) and
-Distant Horizons' `common/.../render/blaze/` wrapper package (which had to solve the
-same "draw arbitrary vertex data with a custom pipeline" problem). The mechanical
-fixes needed to get this cluster compiling clean (package moves, ctor/field
-renames, projection-matrix capture retargeting) are all done — see
+The mechanical fixes needed to get this cluster compiling clean (package moves,
+ctor/field renames, projection-matrix capture retargeting) are all done — see
 [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#rendering-pipeline--mechanical-fixes).
 
-**Deliberately stubbed as no-ops (compiles, but non-functional — see inline `TODO MC
-26.1` comments at each site), because they have no direct API translation and can't be
-verified without an actual game launch:**
+**Still stubbed as no-ops (compiles, but non-functional), because they need
+genuinely new design work and can't be verified without an actual game launch —
+full detail on each in "Outstanding work" below:**
 - The stencil-based portal view-area masking algorithm itself
   (`ViewAreaRenderer.renderPortalArea`/`buildPortalViewAreaTrianglesBuffer`,
   `MyRenderHelper`'s screen-triangle/framebuffer-blit helpers) — these drew custom
   triangles via `ShaderInstance`+`Tesselator`+`BufferUploader`, none of which exist
-  anymore, and the new pipeline has no dynamic stencil state to increment/test against
-  per nested portal layer in the first place. Needs a genuinely different algorithm
-  (not just a new draw-call API), likely modeled on DH's `Blaze` wrapper pattern
-  (`RenderPipelineBuilderWrapper`/`RenderPassWrapper`/`BlazeVertexBufferWrapper`/
-  `BlazeUniformBufferWrapper` — see that repo for a complete, working reference
-  implementation of custom-pipeline immediate-style drawing).
+  anymore, and the new pipeline has no dynamic stencil state to increment/test
+  against per nested portal layer in the first place.
 - The custom clip-plane shader-uniform injection system
-  (`FrontClipping.updateClippingEquationUniformForCurrentShader`/`unsetClippingUniform`,
-  and the vanilla-side `IEShader`/`MixinShaderInstance`/`MixinProgram`/
-  `MixinGameRenderer_Shaders`/`MixinRenderSystem_Clipping`/`MixinShaderInstanceForIris`
-  mixins — all deleted, fully dead since `ShaderInstance`/`Program`/`Shader`/`Uniform`
-  are gone). The old trick (redirect a shader-source-read call to inject a GLSL
-  uniform, then `.set()` its value whenever a shader became active) has no equivalent:
-  shaders are compiled centrally by `ShaderManager` into `RenderPipeline`s with a fixed,
-  build-time-declared uniform list, and there's no "currently active shader" global hook
-  anymore (each `RenderPass` binds uniforms explicitly via
-  `setUniform(name, GpuBuffer)`). A real fix needs a new GLSL-injection point (found:
-  `ShaderManager.loadShader`'s `IOUtils.toString(Reader)` call, verified via bytecode)
-  plus a UBO-backed uniform declared consistently across every affected pipeline, plus
-  a new binding point (candidate: `RenderSystem.bindDefaultUniforms(RenderPass)`, which
-  vanilla itself uses to bind common uniforms to every `RenderPass`).
+  (`FrontClipping.updateClippingEquationUniformForCurrentShader`/
+  `unsetClippingUniform`) — the control-flow half (when/where to enable/disable
+  clipping) is wired back up (see "Completed work" below), but the actual GPU-side
+  effect depends entirely on this still-stubbed uniform mechanism. The legacy
+  `GL_CLIP_PLANE0` path the control-flow half currently drives is likely *already*
+  non-functional on the core GL profile Minecraft uses (`GL_CLIP_PLANE0` is
+  compatibility-profile-only; the core-profile equivalent is
+  `gl_ClipDistance[]`/`GL_CLIP_DISTANCE0`, an unrelated mechanism).
 - The entire Iris-compatibility renderer stack (`ExperimentalIrisPortalRenderer`,
   `IrisPortalRenderer`, `IrisCompatibilityPortalRenderer`, `IPIrisHelper`) — these did
   raw multi-framebuffer stencil compositing via `RenderTarget.frameBufferId`/
@@ -136,37 +121,17 @@ verified without an actual game launch:**
   — kept their control-flow structure (these aren't inherently untranslatable — the
   *bind/clear* calls were fixed or stubbed narrowly) but ultimately call into the
   stubbed drawing helpers above, so portal content won't actually render yet.
-- `MixinLevelRenderer.java`: `LevelRenderer.renderLevel` was completely restructured
-  around a `FrameGraphBuilder` (named `FramePass`es executed later via lambdas — most
-  of the actual solid/translucent/entity draw logic now lives inside a **synthetic
-  lambda method** `lambda$addMainPass$0`, confirmed to exist via `javap`, not
-  sequentially in `renderLevel`'s own body like before). ~8 old injection points
-  (before/after cutout|translucent rendering, before/after a render layer, before/after
-  weather, frame-buffer-clearing redirect) targeted call sites
-  (`DimensionSpecialEffects.constantAmbientLight`, `Sheets.translucentCullBlockSheet`,
-  `LevelRenderer.renderSectionLayer`, `LevelRenderer.renderSnowAndRain`,
-  `RenderSystem.clear(int,boolean)`) that no longer exist in that form or aren't called
-  from `renderLevel`'s own body anymore — removed with `TODO` comments rather than
-  guessed at. **Important:** invalid Mixin `@At(INVOKE)` string targets are NOT caught
-  by `compileJava` (Mixin weaving happens at a separate, later step) — only
-  javac-visible type errors (e.g. referencing the now-fully-removed `LightTexture`
-  class, or `VertexBuffer`-typed `@Shadow` fields for `starBuffer`/`skyBuffer`/
-  `darkBuffer`/`cloudBuffer`, which don't exist on `LevelRenderer` anymore at all — sky/
-  cloud rendering moved to dedicated `SkyRenderer`/`CloudRenderer` classes) show up as
-  compile errors. **This means a clean `compileJava` run is necessary but not
-  sufficient — these ~8 hooks will only reveal themselves as broken at actual Mixin
-  weave time (game launch), which needs a real launch to iterate on.** Same treatment
-  applied to `MixinLevelRenderer_BeforeIris.java` (emptied — its one hook targeted a
-  `"translucent"` string CONSTANT inside the old `renderLevel` body) and
-  `MixinLevelRenderer_Optional.java` (removed one `ShaderInstance.apply()`-targeting
-  hook that drove the now-stubbed clip-plane uniform). The still-valid-looking hooks in
-  these files (targeting `allChanged()`, `setupRender(...)` methods that individually
-  still type-check even though `setupRender` itself was confirmed **fully removed** from
-  `LevelRenderer`, `renderSky`, etc.) were left as-is — same weave-time-only-verifiable
-  caveat applies; `setupRender`'s replacement (visibility/frustum-culling override, a
-  real gameplay feature — `VisibleSectionDiscovery`) likely now lives inside
-  `extractLevel`/`prepareChunkRenders` given the new CPU-extract/GPU-render split, but
-  this needs dedicated research.
+- The terrain-visibility override for portal rendering
+  (`VisibleSectionDiscovery.discoverVisibleSections`, formerly hooked into the
+  now-removed `LevelRenderer.setupRender`) — its structural replacement,
+  `cullTerrain(Camera, Frustum, boolean)`, is built around a fundamentally different
+  `SectionOcclusionGraph`-based algorithm with persistent per-frame traversal state,
+  not the one-shot linear setup the old override can be ported onto by a simple
+  re-anchor.
+- `MixinSodiumOcclusionCuller.java`'s portal cave-culling override — Sodium's own
+  occlusion culling pipeline is now asynchronous/tree-based (confirmed via Sodium's
+  own exact-version-matching source); no single synchronous call site is left to
+  redirect the culling start point on.
 - Cloud-rendering optimization (`MixinLevelRenderer_Clouds.java`, `CloudContext.java`)
   — deleted outright rather than stubbed: `LevelRenderer` no longer has
   `cloudBuffer`/`starBuffer`/`skyBuffer`/`darkBuffer` fields at all (moved to a new
@@ -191,50 +156,27 @@ graph) — any redesigned masking algorithm needs to account for this multi-targ
 compositing, not assume a single shared framebuffer+stencil-buffer for the whole frame.
 
 **Current compile state: 0 errors.** Run `python migration_tools/parse_compile_errors.py
---run` to confirm. The project now compiles clean — full error-count progression
-history is in
+--run` to confirm. Full error-count progression history is in
 [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#compile-error-count-progression-for-reference).
 
-The `ValueInput`/`ValueOutput` entity save-data rewrite and the large wave of small
-mechanical renames it (and other API changes) surfaced are both done — full
-file-by-file detail is in
-[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#entity-save-data-rewrite-valueinputvalueoutput--done).
+### Completed work
 
-**DimLib is now an in-repo module, fully migrated to 26.1.2 — done.** Rather than
-maintaining DimLib (`iPortalTeam/DimLib`, archived/dead upstream, same team as this
-mod) as a separate forked repo + external Gradle dependency, its source was
-imported directly into this repo (`src/main/java/qouteall/dimlib`, merged
-`dimlib.mixins.json`, entrypoints/mixins folded into this mod's own
-`fabric.mod.json`) and migrated to 26.1.2 in place, reusing this repo's own
-already-working build pipeline instead of standing up a separate one. Full detail:
-[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#dimlib-merged-into-this-repo-as-an-in-repo-module--done).
+Every item below is finished; only a short pointer is kept here per this file's own
+policy (see the top of this document) — follow the links for the full story.
 
-**GravityChanger support is dropped entirely — done.** Upstream
-(`com.github.qouteall/GravityChanger`) is archived (read-only since Apr 2026),
-last release targets mc1.20.4; this mod will simply not support it going
-forward. `GravityChangerInterface.java` had its real-API-bound
-`OnGravityChangerPresent` implementation removed, leaving only its existing
-no-op default `Invoker` (gravity always down); the Gradle dependency and its
-conditional activation in `IPModEntry.java` were removed too. This resolved the
-last 25 compile errors — **the project now compiles with 0 errors.** Full
-detail:
-[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#gravitychanger-support-dropped-stubbed-out--done).
-
-**`MixinFogRenderer.java`'s cross-dimension fog color swap is redesigned — done.**
-The old static-field-shadowing mixin (weave-time-broken — `FogRenderer` no
-longer has static color fields to shadow at all) was removed and replaced with
-a `FogRenderer.setupFog(Camera, int, DeltaTracker, float, ClientLevel)`-based
-redesign that needs no static state at all. Full detail:
-[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#mixinfogrendererjavas-cross-dimension-fog-color-swap-redesigned--done).
-
-**`MixinFogRenderer_A_CVB.java`'s weave-time-broken Mixin targets are fixed —
-done.** Found while investigating the above: this separate mixin (alternate
-dimensions' void-darkness override) still targeted the removed
-`FogRenderer.setupColor(...)`/`Camera.getPosition()`, which would also have
-hard-crashed Mixin weaving at game launch. Retargeted to the real replacements
-(`FogRenderer.computeFogColor(...)`/`Camera.position()`) — no behavior change,
-its handler body already used the new method names. Full detail:
-[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#mixinfogrenderer_a_cvbjavas-weave-time-broken-targets-fixed--done).
+- Build & dependencies — [done, verified](migration-26.1-plan-completed.md#build--dependencies--done-verified).
+- Entity save-data rewrite (`ValueInput`/`ValueOutput`) + the mechanical-rename wave
+  it surfaced — [done](migration-26.1-plan-completed.md#entity-save-data-rewrite-valueinputvalueoutput--done).
+- DimLib merged into this repo as an in-repo module — [done](migration-26.1-plan-completed.md#dimlib-merged-into-this-repo-as-an-in-repo-module--done).
+- GravityChanger support dropped entirely — [done](migration-26.1-plan-completed.md#gravitychanger-support-dropped-stubbed-out--done).
+- `net.minecraft.gizmos` debug-drawing system — [investigated, not a fit, not adopted](migration-26.1-plan-completed.md#netminecraftgizmos-debug-drawing-system--investigated-not-adopted).
+- `MixinFogRenderer.java`'s cross-dimension fog color swap, redesigned — [done](migration-26.1-plan-completed.md#mixinfogrendererjavas-cross-dimension-fog-color-swap-redesigned--done).
+- `MixinFogRenderer_A_CVB.java`'s weave-time-broken targets, fixed — [done](migration-26.1-plan-completed.md#mixinfogrenderer_a_cvbjavas-weave-time-broken-targets-fixed--done).
+- `MixinDebugRenderer.java`'s portal wand marker rendering, reconnected — [implemented, weave-time unverified](migration-26.1-plan-completed.md#mixindebugrendererjavas-portal-wand-marker-rendering-reconnected--implemented-weave-time-unverified).
+- `MixinLevelRenderer.java`'s `redirectRenderEntity` weave-crash risk, fixed — [implemented, weave-time unverified](migration-26.1-plan-completed.md#mixinlevelrendererjavas-redirectrenderentity-weave-crash-risk-fixed--implemented-weave-time-unverified).
+- `setupRender`-targeting hooks, re-verified and fixed — [done](migration-26.1-plan-completed.md#setuprender-targeting-hooks-re-verified-and-fixed--done).
+- `MixinLevelRenderer.java`'s ~8 disabled hooks, re-anchored — [implemented, weave-time unverified](migration-26.1-plan-completed.md#mixinlevelrendererjavas-8-disabled-hooks-re-anchored--implemented-weave-time-unverified).
+- Small leftover items (`fabric.mod.json`/`*.mixins.json` stale version metadata) — [done](migration-26.1-plan-completed.md#small-leftover-items-fixed--done).
 
 ## Blocking / external dependency issues
 
@@ -248,47 +190,17 @@ earlier revisions of this doc were fully resolved and moved to
 [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md); the gaps are
 kept so cross-references elsewhere in this section stay valid.)
 
-### Priority order for next session(s) (established after a full-landscape review)
+### Priority order for next session(s)
 
-As of the latest run: **0 compile errors.** Every compile-error cluster is now
-resolved, including the DimLib migration (now an in-repo module — see
-[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#dimlib-merged-into-this-repo-as-an-in-repo-module--done)),
-the `net.minecraft.gizmos` debug-drawing system investigation (confirmed not a
-fit for this mod's own needs — see
-[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#netminecraftgizmos-debug-drawing-system--investigated-not-adopted)),
-and dropping GravityChanger support entirely (see
-[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#gravitychanger-support-dropped-stubbed-out--done)).
-Full changelog of every completed round is in
-[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md). **What's left
-now is exclusively genuinely-new design-and-test work (item 2, portal rendering
-algorithm redesign below), not a known bug/breakage to fix** — every
-weave-time-only issue that was previously tracked here has also now been
-resolved (see below).
+**0 compile errors, every known weave-time-crash risk fixed** (full changelog in
+[migration-26.1-plan-completed.md](migration-26.1-plan-completed.md)). What's left is
+genuinely new design-and-test work (item 2, portal rendering algorithm redesign
+below) plus one remaining weave-time/runtime issue (not a compile error) listed
+immediately below — neither is a known bug left to "fix" so much as testing work
+that needs a real game launch to complete.
 
-**Weave-time-only / runtime-only issues still open (not compile errors, so not in
-the count above — `MixinCamera.java`'s equivalent issue is already fixed, see the
-completed-work log):**
+**Weave-time-only / runtime-only issue still open (not a compile error):**
 
-- **`MixinDebugRenderer.java` (`portal_wand` package) targeted
-  `DebugRenderer.render(PoseStack, MultiBufferSource.BufferSource, double, double,
-  double)`, which is now fully removed** (confirmed via `inspect_class.py` —
-  `DebugRenderer`'s debug-overlay drawing was migrated wholesale to the new
-  declarative `net.minecraft.gizmos` API; `DebugRenderer` itself now only exposes
-  `emitGizmos(Frustum, double, double, double, float)`, called during the
-  CPU-only `extractLevel(...)` phase with no `PoseStack`/`MultiBufferSource`
-  available at all). Since `@Inject` is `require`d by default, this would have
-  hard-crashed Mixin weaving at game launch (not just silently no-op'd) — found
-  and neutralized while investigating the `net.minecraft.gizmos` system (see
-  [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#netminecraftgizmos-debug-drawing-system--investigated-not-adopted)).
-  The real `PoseStack`+`MultiBufferSource`+camera-position call site now lives
-  inside `LevelRenderer.addMainPass`'s captured `FramePass` lambda (confirmed via
-  decompiled source) — the same synthetic-lambda-method re-anchoring problem
-  already tracked for `MixinLevelRenderer.java`'s ~8 disabled hooks below.
-  Disabled (emptied, same precedent as `MixinLevelRenderer_BeforeIris.java`)
-  pending a real game launch to re-anchor against the actual lambda method; the
-  portal wand's marker-drawing logic itself (`PortalWandItem.clientRender`,
-  `ClientPortalWandPortalCreation`/`Drag`/`Copy.render(...)`) is untouched and
-  ready to be reconnected once a hook is found.
 - **`SectionRenderDispatcher.uploadAllPendingUploads()` removed with no
   replacement found** (confirmed via javap — the whole per-section async-upload-
   future-pumping concept from the old chunk pipeline doesn't appear to exist in
@@ -372,31 +284,41 @@ exposes real handles (`GlTexture.glId()` for the raw GL texture id,
     Blaze3D's own immediate GL calls are unverifiable by `compileJava`/static
     analysis; this is exploratory/prototype work, not a confirmed-safe design yet.
 
-Remaining items in this cluster:
-- Redesign or drop the custom clip-plane shader-uniform injection
-  (`FrontClipping`/`IPGlobal.enableClippingMechanism`) — candidate approach documented
-  in Status above (`ShaderManager.loadShader`'s `IOUtils.toString(Reader)` +
-  `RenderSystem.bindDefaultUniforms`).
-- Re-verify/re-anchor `MixinLevelRenderer.java`'s ~8 disabled injection points against
-  the real `lambda$addMainPass$0` synthetic method (found via `javap`, not yet used) —
-  requires an actual game launch since invalid Mixin targets aren't compile errors.
-- Rebuild the Iris-compatibility renderer stack (`ExperimentalIrisPortalRenderer`/
-  `IrisPortalRenderer`/`IrisCompatibilityPortalRenderer`/`IPIrisHelper`), currently
-  stubbed to no-ops.
-- Re-verify `setupRender`-targeting hooks in `MixinLevelRenderer.java`/
-  `MixinLevelRenderer_Optional.java` — `setupRender` itself is confirmed gone from
-  `LevelRenderer`; its replacement (chunk visibility/frustum culling override) likely
-  moved into `extractLevel`/`prepareChunkRenders` (the new CPU-extract phase) but this
-  needs dedicated research.
+Remaining items in this cluster, in priority order (items with a concrete,
+externally-sourced lead first; genuinely-open design work last):
 
-### 4. Small leftover items
-
-- `src/main/resources/fabric.mod.json`:
-  - `"minecraft": ["1.21", "1.21.1"]` → needs to become `26.1.x`.
-  - `"fabric-api": ">=0.109.0"` → bump floor.
-  - `"iris"`/`"sodium"` `breaks` ranges reference stale version numbers.
-- All 5 `*.mixins.json` files declare `"compatibilityLevel": "JAVA_17"` — needs
-  bumping; check what the Mixin version bundled with Loom 1.17.13 supports.
+1. Redesign or drop the custom clip-plane shader-uniform injection
+   (`FrontClipping`/`IPGlobal.enableClippingMechanism`) — candidate approach documented
+   in Status above (`ShaderManager.loadShader`'s `IOUtils.toString(Reader)` +
+   `RenderSystem.bindDefaultUniforms`). Has a specific technical plan already, not yet
+   implemented.
+2. Rebuild the Iris-compatibility renderer stack (`ExperimentalIrisPortalRenderer`/
+   `IrisPortalRenderer`/`IrisCompatibilityPortalRenderer`/`IPIrisHelper`), currently
+   stubbed to no-ops. Checked whether
+   [IrisShaders/Iris](https://github.com/IrisShaders/Iris)'s own `26.1` branch (exact
+   version match) already solves `IPIrisHelper.java`'s framebuffer-copy problem
+   (`RenderTarget.frameBufferId`/`getColorTextureId()`/`getDepthTextureId()` all
+   removed, real replacement is `CommandEncoder.copyTextureToTexture(...)`) — no match
+   found for `copyTextureToTexture` anywhere in Iris's source, so unlike items above,
+   there's no quick externally-sourced lead here. Optional-dependency compat code (only
+   matters with Iris installed), no crash risk since it's already fully stubbed — lower
+   priority than the two items above.
+3. Redesign the terrain-visibility override for portal rendering
+   (`VisibleSectionDiscovery.discoverVisibleSections`, formerly hooked into the
+   now-removed `setupRender`) against `cullTerrain(Camera, Frustum, boolean)`'s
+   `SectionOcclusionGraph`-based algorithm — a fundamentally different,
+   persistent-per-frame-state design that the old one-shot override can't be
+   ported onto by a simple re-anchor. Needs real design work, not a rename.
+4. Redesign `MixinSodiumOcclusionCuller.java`'s portal cave-culling override against
+   Sodium's new **asynchronous, tree-based** occlusion culling pipeline (confirmed via
+   Sodium's own exact-version-matching source, tag `mc26.1.2-0.9.1` —
+   `RenderSectionManager` now schedules `CullTask`s on a background thread; there's no
+   single synchronous call site left to redirect the culling start point on). Not a
+   quick rename fix like `MixinDebugRenderer.java`'s was — full detail in
+   [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#mixinsodiumocclusioncullerjava-investigated--not-a-quick-fix-real-redesign-needed).
+   Also an optional-dependency compat item, already stubbed to vanilla-equivalent
+   behavior (performance-only regression, not a crash) — same priority tier as Iris
+   above.
 
 ## Tooling
 
@@ -431,27 +353,18 @@ Scripts live in `migration_tools/` (pure Python stdlib, no pip packages needed):
 
 ## Next steps
 
-1. **All compile errors are done, including the DimLib migration (now an
-   in-repo module) and dropping GravityChanger support entirely.** The project
-   compiles with **0 errors.** Re-run `parse_compile_errors.py --run` at the
-   start of the next session to confirm this hasn't regressed.
-2. **All known weave-time-only issues are now fixed**, including `MixinCamera.java`/
-   `MixinGameRenderer.java` (an earlier round), `MixinFogRenderer.java`'s
-   cross-dimension fog-color-swap redesign, and `MixinFogRenderer_A_CVB.java`'s
-   stale Mixin retarget (both this round, see
-   [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#mixinfogrendererjavas-cross-dimension-fog-color-swap-redesigned--done)
-   and
-   [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#mixinfogrenderer_a_cvbjavas-weave-time-broken-targets-fixed--done)).
-   Still needs real in-game testing to confirm the redesign actually looks right
-   through portals, once a dev environment launch is possible (item 3 below).
-3. **Get the mod to actually launch in a dev environment** (`./gradlew runClient`)
-   with portal rendering left in its current stubbed/no-op state, to establish a
-   working baseline and start surfacing any remaining Mixin-weave-time-only
-   issues that `compileJava` cannot catch.
-4. Only after that baseline works should the stencil-masking algorithm (direction
-   already chosen, see item 2 above) and clip-plane uniform system be redesigned,
-   since both need real in-game visual feedback to get right — reference Distant
-   Horizons' `common/.../render/blaze/`
-   wrapper package throughout.
+1. **All compile errors and known weave-time-crash risks are fixed.** The
+   project compiles with **0 errors** (full changelog in
+   [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md)).
+   Re-run `parse_compile_errors.py --run` at the start of the next session to
+   confirm this hasn't regressed.
+2. **Get the mod to actually launch in a dev environment** (`./gradlew
+   runClient`) with portal rendering left in its current stubbed/no-op state —
+   this is the single most valuable next step, since it's the prerequisite for
+   verifying every Mixin re-anchor/retarget fixed so far (none of them are
+   checkable by `compileJava`) and for surfacing anything still broken.
+3. Only after that baseline works should the remaining "Outstanding work" items
+   be tackled, in the priority order listed there — they all need real in-game
+   visual feedback to get right, not just static analysis.
 
 
