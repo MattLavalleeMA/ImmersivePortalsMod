@@ -488,9 +488,27 @@ public class ClientTeleportationManager {
             .getDimensionRenderHelper(toDimension).lightmap);
         
         client.level = toWorld;
-        ((IEMinecraftClient) client).ip_setWorldRenderer(
-            ClientWorldLoader.getWorldRenderer(toDimension)
-        );
+        net.minecraft.client.renderer.LevelRenderer newLevelRenderer =
+            ClientWorldLoader.getWorldRenderer(toDimension);
+        ((IEMinecraftClient) client).ip_setWorldRenderer(newLevelRenderer);
+        
+        // BUGFIX (2026-07-12): GameRenderer.update() (a separate per-real-frame
+        // lifecycle phase from render()/renderLevel()) is the ONLY place vanilla
+        // calls LevelRenderer.update(Camera) -> cullTerrain(...) -> compileSections(...)
+        // -- and it only ever does so for whatever LevelRenderer was active at the
+        // START of the frame (before this real teleport swaps it). Sodium's own
+        // per-frame terrain-uniform setup hooks into that same call chain, so
+        // without calling it here too, the destination dimension's LevelRenderer/
+        // SodiumWorldRenderer never gets its per-frame terrain visibility/uniform
+        // buffer populated before renderLevel() tries to draw its chunks THIS frame
+        // -- causing Sodium's "Global terrain uniforms have not been updated" crash
+        // immediately on crossing a portal into a not-yet-rendered-this-session
+        // dimension. Same root cause/fix as MyGameRenderer.switchAndRenderTheWorld's
+        // identical bug for the nested-portal-preview render path (see
+        // docs/portal-rendering-pipeline-and-invisible-content-bug.md, round 8).
+        net.minecraft.client.Camera mainCamera = client.gameRenderer.getMainCamera();
+        mainCamera.setLevel(toWorld);
+        newLevelRenderer.update(mainCamera);
         
         if (client.particleEngine != null) {
             // avoid clearing all particles

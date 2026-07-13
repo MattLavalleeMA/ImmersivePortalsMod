@@ -126,21 +126,25 @@ public abstract class PortalRenderer {
     
     private static boolean shouldSkipRenderingPortal(Portal portal, Supplier<Frustum> frustumSupplier) {
         if (!portal.isPortalValid()) {
+            Helper.log("[PORTAL-SKIP-DIAG] " + portal.getDiscriminator() + " skip: not valid");
             return true;
         }
         
         // if max portal layer is 0, the invisible portals will be force rendered
         if (!portal.isVisible() && IPGlobal.maxPortalLayer != 0) {
+            Helper.log("[PORTAL-SKIP-DIAG] " + portal.getDiscriminator() + " skip: not visible (isVisible=false)");
             return true;
         }
         
         if (RenderStates.getRenderedPortalNum() >= IPGlobal.portalRenderLimit) {
+            Helper.log("[PORTAL-SKIP-DIAG] " + portal.getDiscriminator() + " skip: portalRenderLimit reached");
             return true;
         }
         
         Vec3 cameraPos = TransformationManager.getIsometricAdjustedCameraPos();
         
         if (!portal.isRoughlyVisibleTo(cameraPos)) {
+            Helper.log("[PORTAL-SKIP-DIAG] " + portal.getDiscriminator() + " skip: not roughly visible to cameraPos=" + cameraPos);
             return true;
         }
         
@@ -148,12 +152,14 @@ public abstract class PortalRenderer {
             Portal outerPortal = PortalRendering.getRenderingPortal();
             
             if (outerPortal.cannotRenderInMe(portal)) {
+                Helper.log("[PORTAL-SKIP-DIAG] " + portal.getDiscriminator() + " skip: outerPortal.cannotRenderInMe");
                 return true;
             }
         }
         
         double distance = portal.getDistanceToNearestPointInPortal(cameraPos);
         if (distance > getRenderRange()) {
+            Helper.log("[PORTAL-SKIP-DIAG] " + portal.getDiscriminator() + " skip: distance=" + distance + " > renderRange=" + getRenderRange());
             return true;
         }
         
@@ -162,20 +168,24 @@ public abstract class PortalRenderer {
             if (distance > 0.1) {
                 Frustum frustum = frustumSupplier.get();
                 if (!frustum.isVisible(portal.getThinBoundingBox())) {
+                    Helper.log("[PORTAL-SKIP-DIAG] " + portal.getDiscriminator() + " skip: frustum culled, distance=" + distance);
                     return true;
                 }
             }
         }
         
         if (PortalRendering.isInvalidRecursionRendering(portal)) {
+            Helper.log("[PORTAL-SKIP-DIAG] " + portal.getDiscriminator() + " skip: invalid recursion rendering");
             return true;
         }
         
         boolean predicateTest = PORTAL_RENDERING_PREDICATE.invoker().test(portal);
         if (!predicateTest) {
+            Helper.log("[PORTAL-SKIP-DIAG] " + portal.getDiscriminator() + " skip: predicate test failed");
             return true;
         }
         
+        Helper.log("[PORTAL-SKIP-DIAG] " + portal.getDiscriminator() + " NOT skipped, distance=" + distance);
         return false;
     }
     
@@ -311,10 +321,27 @@ public abstract class PortalRenderer {
     
     private static boolean fabulousWarned = false;
     
+    // TEMP DIAGNOSTIC (2026-07-12): log the resolved active renderer + IPGlobal
+    // .renderMode + Iris state exactly once (not just on change, which
+    // switchRenderer() already does), to definitively confirm the initial
+    // resolution rather than inferring it from the absence/presence of other logs.
+    // Remove once root-caused/fixed.
+    private static boolean loggedInitialRendererResolution = false;
+    
     public static void switchToCorrectRenderer() {
         if (PortalRendering.isRendering()) {
             //do not switch when rendering
             return;
+        }
+        
+        if (!loggedInitialRendererResolution) {
+            loggedInitialRendererResolution = true;
+            Helper.log("[PORTAL-SKIP-DIAG] switchToCorrectRenderer first call: IPGlobal.renderMode="
+                + IPGlobal.renderMode
+                + " IrisInterface.isIrisPresent=" + IrisInterface.invoker.isIrisPresent()
+                + " IrisInterface.isShaders=" + IrisInterface.invoker.isShaders()
+                + " IPCGlobal.experimentalIrisPortalRenderer=" + IPCGlobal.experimentalIrisPortalRenderer
+                + " IPCGlobal.renderer(before)=" + (IPCGlobal.renderer == null ? "null" : IPCGlobal.renderer.getClass().getName()));
         }
         
         if (Minecraft.getInstance().options.graphicsPreset().get() == GraphicsPreset.FABULOUS) {

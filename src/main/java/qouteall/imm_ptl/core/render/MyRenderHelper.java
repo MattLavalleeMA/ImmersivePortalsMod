@@ -33,6 +33,9 @@ import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
+import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL30;
+
 import static org.lwjgl.opengl.GL11.GL_BACK;
 import static org.lwjgl.opengl.GL11.GL_DEPTH_COMPONENT;
 import static org.lwjgl.opengl.GL11.GL_FLOAT;
@@ -76,13 +79,148 @@ public class MyRenderHelper {
         return resourceFactory;
     }
     
+    // Raw GL id of a persistent, depth-attachment-less framebuffer object used only
+    // to temporarily house the main render target's color texture as
+    // GL_COLOR_ATTACHMENT0 while compositing a portal (see drawPortalAreaWithFramebuffer).
+    // Lazily created; never resized/recreated since attaching a differently-sized
+    // texture to an existing FBO's color attachment is valid GL. Mirrors Distant
+    // Horizons' GlDhFramebuffer/GlDhApplyShader.renderToMcTexture() pattern (see
+    // docs/portal-rendering-pipeline-and-invisible-content-bug.md section 2.13) --
+    // deliberately NOT reusing the real main-target FBO for this draw, since that one
+    // still has the real depth texture attached and simultaneously sampling +
+    // targeting the same depth texture in one draw is a feedback hazard.
+    private static int compositeFboId = -1;
+    
+    /**
+     * Composites a portal's separately-rendered nested-world content (already drawn
+     * into {@code textureProvider}, an offscreen buffer the same size as the main
+     * window) onto the main render target's color texture, by drawing the portal's
+     * own screen-facing quad geometry via {@link PositionTexturedGlProgram} and
+     * sampling {@code textureProvider}'s color texture per-fragment at the same
+     * screen pixel. The quad's own rasterized shape is the mask -- no stencil test
+     * needed.
+     * <p>
+     * Occlusion against real world geometry already in front of the portal is
+     * decided manually in {@link PositionTexturedGlProgram}'s fragment shader by
+     * comparing this quad's own rasterized depth against the main render target's
+     * real depth texture (sampled here and passed in) -- see that class's javadoc
+     * for why this replaced both hardware occlusion queries (unreliable, section
+     * 2.12) and a depth-priming approach tried afterward (also unreliable --
+     * clobbered by vanilla's own sky pass, section 2.16+/session notes).
+     * <p>
+     * This draw targets {@link #compositeFboId} (the main color texture reattached
+     * to a depth-attachment-less FBO each call, so this draw can safely run with
+     * hardware depth test disabled, and sampling the main target's real depth
+     * texture here is never a read/write feedback hazard since it's never attached
+     * to this FBO) and then restores the GL framebuffer binding to {@code
+     * restoreToFbo} (the raw FBO id that was actually bound for the main render
+     * target before this portal started rendering, captured by the caller --
+     * necessary because swapping {@code Minecraft.mainRenderTarget} via {@code
+     * ip_setFrameBuffer} only changes which target *future* high-level draws are
+     * issued against, it does not itself rebind anything at the raw GL level).
+     */
     public static void drawPortalAreaWithFramebuffer(
         Portal portal,
         RenderTarget textureProvider,
         Matrix4f modelViewMatrix,
-        Matrix4f projectionMatrix
+        Matrix4f projectionMatrix,
+        int restoreToFbo
     ) {
-        // TODO MC 26.1: see class-level TODO - stubbed no-op.
+        com.mojang.blaze3d.textures.GpuTexture colorTexture = textureProvider.getColorTexture();
+        if (colorTexture == null) {
+            return;
+        }
+        int rawGlColorTextureId = ((com.mojang.blaze3d.opengl.GlTexture) colorTexture).glId();
+        
+        RenderTarget mainTarget = client.getMainRenderTarget();
+        com.mojang.blaze3d.textures.GpuTexture mainColorTexture = mainTarget.getColorTexture();
+        com.mojang.blaze3d.textures.GpuTexture mainDepthTexture = mainTarget.getDepthTexture();
+        if (mainColorTexture == null || mainDepthTexture == null) {
+            return;
+        }
+        int rawGlMainColorTextureId = ((com.mojang.blaze3d.opengl.GlTexture) mainColorTexture).glId();
+        int rawGlMainDepthTextureId = ((com.mojang.blaze3d.opengl.GlTexture) mainDepthTexture).glId();
+        
+        if (compositeFboId == -1) {
+            compositeFboId = GlStateManager.glGenFramebuffers();
+        }
+        
+        GlStateManager._glBindFramebuffer(GL30.GL_FRAMEBUFFER, compositeFboId);
+        GlStateManager._glFramebufferTexture2D(
+            GL30.GL_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0, GL11.GL_TEXTURE_2D, rawGlMainColorTextureId, 0
+        );
+        
+        GlStateManager._disableDepthTest();
+        GlStateManager._enableCull();
+        
+        PositionTexturedGlProgram.begin(
+            modelViewMatrix, projectionMatrix,
+            rawGlColorTextureId, rawGlMainDepthTextureId,
+            textureProvider.width, textureProvider.height
+        );
+        
+        Vec3 originRelativeToCamera = portal.getOriginPos().subtract(CHelper.getCurrentCameraPos());
+        portal.renderViewAreaMesh(originRelativeToCamera, PositionTexturedGlProgram.VERTEX_OUTPUT);
+        
+        PositionTexturedGlProgram.end();
+        
+        GlStateManager._glBindFramebuffer(GL30.GL_FRAMEBUFFER, restoreToFbo);
+        GlStateManager._enableDepthTest();
+        
+        CHelper.checkGlError();
+    }
+    
+    // Raw GL id of a persistent, single-purpose scratch FBO used only by the
+    // debugRead*Pixel diagnostics below -- deliberately separate from compositeFboId
+    // so a diagnostic read can never clobber the attachment compositing itself
+    // depends on. Lazily created.
+    private static int debugScratchFboId = -1;
+    
+    private static int ensureDebugScratchFbo() {
+        if (debugScratchFboId == -1) {
+            debugScratchFboId = GlStateManager.glGenFramebuffers();
+        }
+        return debugScratchFboId;
+    }
+    
+    // TEMP DIAGNOSTIC (2026-07-12): pixel-level readback helpers added to pin down
+    // the "portal content sometimes shows real-world background instead of nested
+    // content" bug (docs/portal-rendering-pipeline-and-invisible-content-bug.md
+    // section 2.16+) with real numbers instead of screenshot-guessing -- reads a
+    // single texel from an arbitrary raw GL texture (depth or color) by temporarily
+    // attaching it to a dedicated scratch FBO, without disturbing whatever FBO is
+    // currently bound for real rendering. Remove once root-caused/fixed.
+    public static float debugReadDepthPixel(int rawGlDepthTextureId, int x, int y) {
+        int prevFbo = GlStateManager.getFrameBuffer(GL30.GL_FRAMEBUFFER);
+        GlStateManager._glBindFramebuffer(GL30.GL_FRAMEBUFFER, ensureDebugScratchFbo());
+        GlStateManager._glFramebufferTexture2D(
+            GL30.GL_FRAMEBUFFER, GL30.GL_DEPTH_ATTACHMENT, GL11.GL_TEXTURE_2D, rawGlDepthTextureId, 0
+        );
+        
+        ByteBuffer directBuffer = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder());
+        FloatBuffer floatBuffer = directBuffer.asFloatBuffer();
+        glReadPixels(x, y, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, floatBuffer);
+        float value = floatBuffer.get(0);
+        
+        GlStateManager._glBindFramebuffer(GL30.GL_FRAMEBUFFER, prevFbo);
+        return value;
+    }
+    
+    public static float[] debugReadColorPixel(int rawGlColorTextureId, int x, int y) {
+        int prevFbo = GlStateManager.getFrameBuffer(GL30.GL_FRAMEBUFFER);
+        GlStateManager._glBindFramebuffer(GL30.GL_FRAMEBUFFER, ensureDebugScratchFbo());
+        GlStateManager._glFramebufferTexture2D(
+            GL30.GL_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0, GL11.GL_TEXTURE_2D, rawGlColorTextureId, 0
+        );
+        
+        ByteBuffer directBuffer = ByteBuffer.allocateDirect(16).order(ByteOrder.nativeOrder());
+        FloatBuffer floatBuffer = directBuffer.asFloatBuffer();
+        glReadPixels(x, y, 1, 1, org.lwjgl.opengl.GL11.GL_RGBA, GL_FLOAT, floatBuffer);
+        float[] result = new float[4];
+        floatBuffer.get(result);
+        
+        GlStateManager._glBindFramebuffer(GL30.GL_FRAMEBUFFER, prevFbo);
+        return result;
     }
     
     public static void renderScreenTriangle() {
@@ -104,10 +242,32 @@ public class MyRenderHelper {
     
     /**
      * {@link RenderTarget#blitToScreen()}
+     * <p>
+     * Draws a screen-covering quad (two triangles, NDC coords, identity model/view/
+     * projection matrices) via {@link PositionColorGlProgram}, a small raw-GL program
+     * that bypasses Blaze3D's RenderPipeline - see that class's javadoc for why.
      */
     @IPVanillaCopy
     public static void renderScreenTriangle(int r, int g, int b, int a) {
-        // TODO MC 26.1: see class-level TODO - stubbed no-op.
+        Matrix4f identity = new Matrix4f();
+        
+        PositionColorGlProgram.begin(
+            identity, identity,
+            new Vec3(r / 255.0, g / 255.0, b / 255.0), a / 255.0f
+        );
+        
+        PositionColorGlProgram.addTriangle(
+            1, -1, 0,
+            1, 1, 0,
+            -1, 1, 0
+        );
+        PositionColorGlProgram.addTriangle(
+            -1, 1, 0,
+            -1, -1, 0,
+            1, -1, 0
+        );
+        
+        PositionColorGlProgram.end();
     }
     
     /**

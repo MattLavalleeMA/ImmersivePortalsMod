@@ -19,10 +19,10 @@ import net.minecraft.client.renderer.SectionBufferBuilderPack;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
 import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
+import net.minecraft.client.renderer.state.level.LevelRenderState;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.CardinalLighting;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.material.FogType;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
@@ -206,10 +206,29 @@ public class MyGameRenderer {
         // only place vanilla itself computes this). This is a source-confirmed
         // translation, but still needs real in-game testing to confirm portal
         // fog actually looks right end-to-end (see docs/migration-26.1-plan.md).
-        CameraRenderState cameraRenderState =
-            client.gameRenderer.getGameRenderState().levelRenderState.cameraRenderState;
-        FogType oldFogType = cameraRenderState.fogType;
-        FogData oldFogData = cameraRenderState.fogData;
+        //
+        // MC 26.1 also split GameRenderer's per-frame work into separate update()/
+        // extract()/render() phases (confirmed via decompiled source): the
+        // gameRenderState.levelRenderState.cameraRenderState object (pos/rotation/
+        // projection/view matrices/cull frustum - NOT just fog) is populated exactly
+        // ONCE per real frame, for the OUTER camera only, by GameRenderer.extract()
+        // (a private extractCamera() call this mod cannot hook without a Mixin
+        // accessor). renderLevel() itself just reads that already-extracted
+        // CameraRenderState directly (confirmed: no extractRenderState() call inside
+        // renderLevel) - so without doing this ourselves, nested portal-content
+        // rendering would silently reuse the OUTER world's camera matrices instead
+        // of the destination dimension's. Since CameraRenderState/LevelRenderState
+        // fields are all public and mutable, swap in a fresh CameraRenderState object
+        // for the duration of this nested render (simpler/safer than deep-copying
+        // every mutable field of the old one to restore later), and populate it
+        // ourselves via Camera.extractRenderState() (public), which also runs
+        // MixinCamera's existing getViewRotationMatrix() wrap that supplies the
+        // correct portal rotation/mirror transform.
+        LevelRenderState levelRenderState =
+            client.gameRenderer.getGameRenderState().levelRenderState;
+        CameraRenderState oldCameraRenderState = levelRenderState.cameraRenderState;
+        CameraRenderState cameraRenderState = new CameraRenderState();
+        levelRenderState.cameraRenderState = cameraRenderState;
         ((IEParticleManager) client.particleEngine).ip_setWorld(newWorld);
         if (BlockManipulationClient.remotePointedDim == newDimension) {
             client.hitResult = BlockManipulationClient.remoteHitResult;
@@ -217,9 +236,57 @@ public class MyGameRenderer {
         if (!PortalRendering.shouldRenderHitResult()) {
             client.hitResult = null;
         }
-        ieGameRenderer.ip_setCamera(newCamera);
-        ((IECamera) newCamera).portal_setPos(thisTickCameraPos);
+        
+        // set up the new camera: level/entity/fov-modifier must be set before
+        // update() (which computes rotation/fov/perspective/cull-frustum from the
+        // focused entity's real - wrong-dimension - position), then override the
+        // position with the portal-transformed one update() got wrong.
+        newCamera.setLevel(newWorld);
         ((IECamera) newCamera).portal_setFocusedEntity(client.getCameraEntity());
+        ((IECamera) newCamera).ip_setFovModifier(1.0f);
+        newCamera.update(client.getDeltaTracker());
+        ((IECamera) newCamera).portal_setPos(thisTickCameraPos);
+        
+        // BUGFIX (2026-07-12): this Sodium context creation/switch used to happen
+        // AFTER worldRenderer.update(newCamera) below (30+ lines later in the
+        // original ordering). Since client.levelRenderer/client.level were already
+        // switched to the destination dimension earlier in this function,
+        // worldRenderer.update(newCamera) would run cullTerrain()/setupTerrain()
+        // against whichever Sodium RenderSectionManager context was CURRENTLY active
+        // at that moment (the previous context, e.g. stale data from this
+        // dimension's last use) -- then, immediately afterwards, this call would
+        // swap in a brand new, never-updated context (schedules an update but does
+        // NOT synchronously run it) right before renderLevel() tries to actually
+        // draw with it. That's exactly the "Global terrain uniforms have not been
+        // updated" Sodium crash reported after repeatedly traversing portals -- the
+        // freshly-swapped-in context's uniforms were never populated before being
+        // drawn with. Moving this block to BEFORE worldRenderer.update(newCamera)
+        // ensures update()'s cullTerrain()/setupTerrain() call runs against the
+        // SAME context that is about to be rendered with, actually populating its
+        // uniforms.
+        Object newSodiumContext = SodiumInterface.invoker.createNewContext(renderDistance);
+        SodiumInterface.invoker.switchContextWithCurrentWorldRenderer(newSodiumContext);
+        
+        // MC 26.1: GameRenderer.update() (a separate per-real-frame lifecycle phase
+        // from render()/renderLevel()) is the ONLY place vanilla calls
+        // `LevelRenderer.update(Camera)` -> `cullTerrain(...)` -> `compileSections(...)`
+        // - and it only ever does so for the OUTER world's LevelRenderer (whatever
+        // client.levelRenderer was at the start of the frame, before any nested portal
+        // rendering swaps it). Sodium's own per-frame terrain-uniform setup
+        // (SodiumWorldRenderer.setupTerrain(), confirmed via MixinSodiumWorldRenderer's
+        // diagnostic logging) hooks into this same vanilla call chain, so without
+        // calling it here too, the destination dimension's LevelRenderer/
+        // SodiumWorldRenderer never gets its per-frame terrain visibility/uniform
+        // buffer populated before renderLevel() tries to draw its chunks - causing
+        // Sodium's "Global terrain uniforms have not been updated" crash the first
+        // time a portal's content is actually rendered.
+        worldRenderer.update(newCamera);
+        
+        ieGameRenderer.ip_setCamera(newCamera);
+        
+        float cameraEntityPartialTicks = newCamera.getCameraEntityPartialTicks(client.getDeltaTracker());
+        newCamera.extractRenderState(cameraRenderState, cameraEntityPartialTicks);
+        
         cameraRenderState.fogType = newCamera.getFluidInCamera();
         cameraRenderState.fogData = ieGameRenderer.ip_getFogRenderer().setupFog(
             newCamera,
@@ -252,9 +319,6 @@ public class MyGameRenderer {
                 client.renderBuffers().bufferSource().endBatch();
             }
         }
-        
-        Object newSodiumContext = SodiumInterface.invoker.createNewContext(renderDistance);
-        SodiumInterface.invoker.switchContextWithCurrentWorldRenderer(newSodiumContext);
         
         ((IEWorldRenderer) worldRenderer).portal_setTransparencyShader(null);
         
@@ -296,8 +360,7 @@ public class MyGameRenderer {
         
         ((IEWorldRenderer) worldRenderer).portal_setTransparencyShader(oldTransparencyShader);
         
-        cameraRenderState.fogType = oldFogType;
-        cameraRenderState.fogData = oldFogData;
+        levelRenderState.cameraRenderState = oldCameraRenderState;
         
         ((IEWorldRenderer) oldWorldRenderer).portal_setChunkInfoList(oldChunkInfoList);
         VisibleSectionDiscovery.returnList(newChunkInfoList);

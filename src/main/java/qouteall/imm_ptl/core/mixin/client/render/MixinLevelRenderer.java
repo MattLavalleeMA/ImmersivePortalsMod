@@ -504,6 +504,17 @@ public abstract class MixinLevelRenderer implements IEWorldRenderer {
     // since it intercepts every caller, not just one read site inside renderLevel's own body.
     @Inject(method = "getTranslucentTarget", at = @At("HEAD"), cancellable = true)
     private void onGetTranslucentTarget(CallbackInfoReturnable<RenderTarget> cir) {
+        // TEMP DIAGNOSTIC (2026-07-12): confirm whether this getter is actually
+        // invoked (and PortalRendering.isRendering() is true) at the moment Sodium's
+        // translucent terrain pass binds its own separate FBO -- suspecting Sodium
+        // never queries this vanilla getter at all (it manages its own render
+        // target independently), which would explain why portal content still
+        // bleeds outside the mask on the translucent pass despite this override.
+        // Remove once root-caused/fixed.
+        qouteall.q_misc_util.Helper.log(
+            "[PORTAL-SKIP-DIAG] getTranslucentTarget called, PortalRendering.isRendering()="
+                + PortalRendering.isRendering() + " depth=" + MyGameRenderer.portalRenderDepth
+        );
         if (PortalRendering.isRendering()) {
             cir.setReturnValue(null);
         }

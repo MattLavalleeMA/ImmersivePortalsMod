@@ -87,7 +87,18 @@ public class CrossPortalViewRendering {
             .setOverwriteCameraTransformation(false)
             .setDescription(null)
             .setRenderDistance(client.options.getEffectiveRenderDistance())
-            .setDoRenderHand(false)
+            // MC 26.1: doRenderHand used to be a dead flag (never actually gated
+            // anything, see MixinGameRenderer.java's fix), so this `false` was never
+            // consequential before. Now that the flag is wired up, this needs to be
+            // `true`: unlike the normal recursive portal-content render (which draws
+            // ON TOP of an already-rendered outer world within a stencil mask, and
+            // relies on the outer world's own real renderLevel() call to render the
+            // hand separately), this cross-portal-view mode is invoked from
+            // redirectRenderingWorld's early-return, which SKIPS the outer world's
+            // real GameRenderer.renderLevel() call entirely for that frame - so this
+            // IS the only rendering happening this frame, and needs to render its own
+            // hand or the player gets no hand at all while standing at a portal.
+            .setDoRenderHand(true)
             .setEnableViewBobbing(false)
             .build();
         

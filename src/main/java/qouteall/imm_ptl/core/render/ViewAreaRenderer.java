@@ -1,10 +1,10 @@
 package qouteall.imm_ptl.core.render;
 
 import com.mojang.blaze3d.opengl.GlStateManager;
-import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
+import org.lwjgl.opengl.GL11;
 import qouteall.imm_ptl.core.CHelper;
 import qouteall.imm_ptl.core.IPGlobal;
 import qouteall.imm_ptl.core.portal.Portal;
@@ -12,14 +12,15 @@ import qouteall.imm_ptl.core.render.context_management.PortalRendering;
 import qouteall.imm_ptl.core.render.context_management.RenderStates;
 import qouteall.q_misc_util.my_util.TriangleConsumer;
 
-// TODO MC 26.1: renderPortalArea/buildPortalViewAreaTrianglesBuffer used to draw the
-// portal's view-area geometry (as colored triangles via a custom ShaderInstance) into
-// the stencil buffer to mask which screen pixels show the portal's other side.
-// ShaderInstance/Tesselator-based BufferUploader.draw no longer exist - the new pipeline
-// has no dynamic stencil test state at all (DepthStencilState is baked into a
-// RenderPipeline at build time), so this needs a new algorithm (custom RenderPipeline +
-// GpuBuffer + RenderPass, see Distant Horizons' "Blaze" wrapper package for reference),
-// not just an API port. Stubbed as no-op pending dedicated in-game-tested follow-up.
+// MC 26.1: renderPortalArea/buildPortalViewAreaTrianglesBuffer draw the portal's
+// view-area geometry (as colored triangles) into the stencil buffer to mask which
+// screen pixels show the portal's other side. The old ShaderInstance/Tesselator/
+// BufferBuilder/BufferUploader classes this used to be built on no longer exist, and
+// the new RenderPipeline abstraction has no dynamic stencil-test state at all
+// (DepthStencilState is baked into a RenderPipeline at build time) - so this now draws
+// via PositionColorGlProgram, a small hand-rolled raw-GL (LWJGL) program that bypasses
+// Blaze3D's RenderPipeline/RenderPass/GpuBuffer entirely for this one feature, matching
+// the plan in docs/migration-26.1-plan.md.
 public class ViewAreaRenderer {
     
     public static void renderPortalArea(
@@ -28,14 +29,99 @@ public class ViewAreaRenderer {
         boolean doFaceCulling, boolean doModifyColor,
         boolean doModifyDepth, boolean doClip
     ) {
-        // no-op: see class-level TODO
+        if (doFaceCulling) {
+            GlStateManager._enableCull();
+        }
+        else {
+            GlStateManager._disableCull();
+        }
+        
+        if (portal.isFuseView() && IPGlobal.maxPortalLayer != 0) {
+            GL11.glColorMask(false, false, false, false);
+        }
+        else {
+            if (!doModifyColor) {
+                GL11.glColorMask(false, false, false, false);
+            }
+            else {
+                GL11.glColorMask(true, true, true, true);
+            }
+        }
+        
+        if (doModifyDepth) {
+            if (portal.isFuseView()) {
+                GlStateManager._depthMask(false);
+            }
+            else {
+                GlStateManager._depthMask(true);
+            }
+        }
+        else {
+            GlStateManager._depthMask(false);
+        }
+        
+        boolean shouldReverseCull = PortalRendering.isRenderingOddNumberOfMirrors();
+        if (shouldReverseCull) {
+            MyRenderHelper.applyMirrorFaceCulling();
+        }
+        
+        if (doClip) {
+            if (PortalRendering.isRendering()) {
+                FrontClipping.setupInnerClipping(
+                    PortalRendering.getActiveClippingPlane(),
+                    modelViewMatrix, 0  // don't do adjustment
+                );
+            }
+        }
+        else {
+            FrontClipping.disableClipping();
+        }
+        
+        GlStateManager._enableDepthTest();
+        
+        CHelper.enableDepthClamp();
+        
+        PositionColorGlProgram.begin(modelViewMatrix, projectionMatrix, fogColor, 1.0f);
+        
+        buildPortalViewAreaTrianglesBuffer(
+            fogColor,
+            portal,
+            CHelper.getCurrentCameraPos(),
+            RenderStates.getPartialTick()
+        );
+        
+        PositionColorGlProgram.end();
+        
+        GlStateManager._enableCull();
+        CHelper.disableDepthClamp();
+        
+        GL11.glColorMask(true, true, true, true);
+        GlStateManager._depthMask(true);
+        
+        if (shouldReverseCull) {
+            MyRenderHelper.recoverFaceCulling();
+        }
+        
+        if (PortalRendering.isRendering()) {
+            FrontClipping.disableClipping();
+        }
+        
+        CHelper.checkGlError();
     }
     
+    /**
+     * Accumulates the portal's view-area mesh triangles into the currently-active
+     * {@link PositionColorGlProgram} batch (started by the caller via {@code begin()}).
+     * The {@code fogColor} param is unused now that color is set once as a uniform in
+     * {@code begin()} - kept for API-compatibility with existing call sites.
+     */
     public static void buildPortalViewAreaTrianglesBuffer(
         Vec3 fogColor, Portal portal,
         Vec3 cameraPos, float partialTick
     ) {
-        // no-op: see class-level TODO
+        Vec3 originRelativeToCamera = portal.getOriginPos().subtract(cameraPos);
+        
+        portal.renderViewAreaMesh(originRelativeToCamera, PositionColorGlProgram.VERTEX_OUTPUT);
     }
     
     public static void outputTriangle(

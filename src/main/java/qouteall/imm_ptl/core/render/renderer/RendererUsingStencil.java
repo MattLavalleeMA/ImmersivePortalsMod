@@ -8,6 +8,8 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.lwjgl.opengl.GL11;
 import qouteall.imm_ptl.core.CHelper;
+import qouteall.imm_ptl.core.IPCGlobal;
+import qouteall.imm_ptl.core.IPGlobal;
 import qouteall.imm_ptl.core.compat.IPPortingLibCompat;
 import qouteall.imm_ptl.core.portal.Portal;
 import qouteall.imm_ptl.core.portal.PortalRenderInfo;
@@ -16,7 +18,9 @@ import qouteall.imm_ptl.core.render.MyRenderHelper;
 import qouteall.imm_ptl.core.render.ViewAreaRenderer;
 import qouteall.imm_ptl.core.render.context_management.FogRendererContext;
 import qouteall.imm_ptl.core.render.context_management.PortalRendering;
+import qouteall.imm_ptl.core.render.context_management.RenderStates;
 import qouteall.imm_ptl.core.render.context_management.WorldRenderInfo;
+import qouteall.q_misc_util.Helper;
 
 import java.util.List;
 
@@ -88,8 +92,26 @@ public class RendererUsingStencil extends PortalRenderer {
         //nothing
     }
     
+    // TEMP DIAGNOSTIC (2026-07-12): logs the exact call stack the FIRST time this
+    // method runs, to definitively confirm (not guess) what's calling into
+    // RendererUsingStencil while compatibilityRenderMode/RendererUsingFrameBuffer is
+    // supposed to be the active renderer. Remove once root-caused/fixed.
+    private static boolean loggedFirstCallStack = false;
+    
     @Override
     public void prepareRendering() {
+        if (!loggedFirstCallStack) {
+            loggedFirstCallStack = true;
+            StringBuilder sb = new StringBuilder("[PORTAL-SKIP-DIAG] RendererUsingStencil.prepareRendering() called! IPCGlobal.renderer=")
+                .append(IPCGlobal.renderer == null ? "null" : IPCGlobal.renderer.getClass().getName())
+                .append(" IPGlobal.renderMode=").append(IPGlobal.renderMode)
+                .append(" stack:\n");
+            for (StackTraceElement e : Thread.currentThread().getStackTrace()) {
+                sb.append("    at ").append(e).append("\n");
+            }
+            qouteall.q_misc_util.Helper.log(sb.toString());
+        }
+        
         if (!IPPortingLibCompat.getIsStencilEnabled(client.getMainRenderTarget())) {
             IPPortingLibCompat.setIsStencilEnabled(client.getMainRenderTarget(), true);
             
@@ -110,6 +132,36 @@ public class RendererUsingStencil extends PortalRenderer {
         GlStateManager._enableDepthTest();
         GL11.glEnable(GL_STENCIL_TEST);
         
+        // TEMP DIAGNOSTIC (2026-07-12): confirm which FBO is actually bound when this
+        // clear runs, and whether the stencil buffer really reads back as 0
+        // immediately afterward -- suspecting the clear above operates on a
+        // different/no-op-for-stencil framebuffer than the one actually drawn to
+        // later in the frame (see the TODO above). Remove once root-caused/fixed.
+        {
+            int fboAtClear = GL11.glGetInteger(org.lwjgl.opengl.GL30.GL_FRAMEBUFFER_BINDING);
+            int w = client.getWindow().getWidth();
+            int h = client.getWindow().getHeight();
+            java.nio.ByteBuffer stencilBuf = java.nio.ByteBuffer.allocateDirect(1);
+            GL11.glReadPixels(w / 2, h / 2, 1, 1, GL11.GL_STENCIL_INDEX, GL11.GL_UNSIGNED_BYTE, stencilBuf);
+            // TEMP DIAGNOSTIC (2026-07-12): also read GL_STENCIL_BITS of the currently
+            // bound FBO -- MixinRenderTarget's stencil-injection mixins are both
+            // `require = 0` (silently disabled, per their own comments: "createBuffers
+            // no longer calls GlStateManager._texImage2D/_glFramebufferTexture2D at
+            // all" on MC 26.1). If this reads 0 here too, the whole
+            // add-a-stencil-attachment mechanism is fully dead post-migration, and
+            // FBO 0 never actually had real stencil bits either -- meaning the
+            // occlusion-query "anySamplePassed" checks were never validating a real
+            // mask at all (a framebuffer with no stencil buffer always passes the
+            // stencil test trivially, everywhere). Remove once root-caused/fixed.
+            int stencilBitsHere = GL11.glGetInteger(GL11.GL_STENCIL_BITS);
+            qouteall.q_misc_util.Helper.log(
+                "[PORTAL-SKIP-DIAG] prepareRendering stencilBitsAtClear=" + stencilBitsHere
+            );
+            qouteall.q_misc_util.Helper.log(
+                "[PORTAL-SKIP-DIAG] prepareRendering fboAtClear=" + fboAtClear
+                    + " stencilAtCenterAfterClear=" + (stencilBuf.get(0) & 0xFF)
+            );
+        }
     }
     
     @Override
@@ -142,6 +194,10 @@ public class RendererUsingStencil extends PortalRenderer {
         });
         
         Profiler.get().pop();
+        
+        Helper.log("[PORTAL-SKIP-DIAG] " + portal.getDiscriminator() + " anySamplePassed=" + anySamplePassed
+            + " vertexCount=" + qouteall.imm_ptl.core.render.PositionColorGlProgram.lastVertexCount
+            + " " + qouteall.imm_ptl.core.render.PositionColorGlProgram.lastDrawStateDiag);
         
         if (!anySamplePassed) {
             setStencilStateForWorldRendering();
@@ -196,10 +252,36 @@ public class RendererUsingStencil extends PortalRenderer {
         // update it before pushing
         FrontClipping.updateInnerClipping(modelView);
         
+        // TEMP DIAGNOSTIC (2026-07-12): compare against prepareRendering()'s own
+        // fboAtClear/stencilAtCenterAfterClear log -- if fboAtDraw differs from
+        // fboAtClear, or stencilAtCenterBeforeDraw is nonzero here despite the clear
+        // reporting 0, that proves the once-per-frame stencil clear is landing on a
+        // different framebuffer than this draw actually targets. Remove once
+        // root-caused/fixed.
+        {
+            int fboAtDraw = GL11.glGetInteger(org.lwjgl.opengl.GL30.GL_FRAMEBUFFER_BINDING);
+            int w = client.getWindow().getWidth();
+            int h = client.getWindow().getHeight();
+            java.nio.ByteBuffer stencilBuf = java.nio.ByteBuffer.allocateDirect(1);
+            GL11.glReadPixels(w / 2, h / 2, 1, 1, GL11.GL_STENCIL_INDEX, GL11.GL_UNSIGNED_BYTE, stencilBuf);
+            qouteall.q_misc_util.Helper.log(
+                "[PORTAL-SKIP-DIAG] " + portal.getDiscriminator()
+                    + " renderPortalViewAreaToStencil fboAtDraw=" + fboAtDraw
+                    + " stencilAtCenterBeforeDraw=" + (stencilBuf.get(0) & 0xFF)
+                    + " outerPortalStencilValue=" + outerPortalStencilValue
+            );
+        }
+        
+        // MC 26.1: RenderSystem.getProjectionMatrix() was removed - RenderStates
+        // .basicProjectionMatrix (captured every LevelRenderer.renderLevel call via
+        // MixinGameRenderer's ip_captureBasicProjectionMatrix) is the real replacement.
+        // This used to be an identity-matrix placeholder because renderPortalArea was a
+        // no-op stub at the time - now that it actually draws geometry, an identity
+        // projection would badly mis-transform the mask triangles.
         ViewAreaRenderer.renderPortalArea(
             portal, Vec3.ZERO,
             modelView,
-            new Matrix4f(), // TODO MC 26.1: RenderSystem.getProjectionMatrix() removed; renderPortalArea is stubbed anyway
+            RenderStates.basicProjectionMatrix,
             true, true,
             true, true
         );
@@ -246,7 +328,7 @@ public class RendererUsingStencil extends PortalRenderer {
         ViewAreaRenderer.renderPortalArea(
             portal, Vec3.ZERO,
             modelView,
-            new Matrix4f(), // TODO MC 26.1: RenderSystem.getProjectionMatrix() removed; renderPortalArea is stubbed anyway
+            RenderStates.basicProjectionMatrix, // MC 26.1: see renderPortalViewAreaToStencil's own comment above
             false, false,
             true,
             true // important: should clip, otherwise depth will be abnormal when viewing scale box from inside in portal

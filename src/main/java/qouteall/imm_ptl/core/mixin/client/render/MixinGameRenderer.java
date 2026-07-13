@@ -5,6 +5,8 @@ import net.minecraft.util.profiling.Profiler;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
+import com.mojang.blaze3d.systems.CommandEncoder;
+import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Camera;
 import net.minecraft.client.DeltaTracker;
@@ -41,6 +43,7 @@ import qouteall.imm_ptl.core.render.MyRenderHelper;
 import qouteall.imm_ptl.core.render.TransformationManager;
 import qouteall.imm_ptl.core.render.context_management.PortalRendering;
 import qouteall.imm_ptl.core.render.context_management.RenderStates;
+import qouteall.imm_ptl.core.render.context_management.WorldRenderInfo;
 import qouteall.imm_ptl.core.render.renderer.PortalRenderer;
 import qouteall.imm_ptl.core.teleportation.ClientTeleportationManager;
 import qouteall.q_misc_util.Helper;
@@ -58,11 +61,18 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     
     // GameRenderer's own `renderHand` field was removed entirely (not just made
     // inaccessible -- confirmed via javap that no such field exists anymore), so
-    // this can no longer be a @Shadow. Tracked independently here instead. Note
-    // this flag isn't actually wired into anything that skips rendering the hand
-    // yet -- that's separate portal-rendering-algorithm work, not related to the
-    // onRenderHandBegins/onRenderHandEnds hooks below (those were fixed to match
-    // GameRenderer.renderItemInHand's new CameraRenderState/Matrix4fc signature).
+    // this can no longer be a @Shadow. Tracked independently here instead.
+    //
+    // TEMP DIAGNOSTIC FINDING (2026-07-12): confirmed via runtime logging that this
+    // field's own `= true` initializer never actually takes effect - it reads as
+    // `false` from the very first frame, with ip_setDoRenderHand(boolean) never
+    // observed changing its value at all (added a temporary log-on-change in that
+    // setter that never fired). Root cause not fully confirmed (possible @Unique
+    // field-initializer-merge quirk with this Mixin/target combination), but forcing
+    // the true default via an @Inject at the constructor's RETURN (a well-established,
+    // always-reliable Mixin pattern, unlike relying on the field's own inline
+    // initializer) fixes it regardless of the underlying cause - see the constructor
+    // inject below.
     @Unique
     private boolean renderHand = true;
     @Shadow
@@ -91,6 +101,13 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     // resetProjectionMatrix @Shadow above.
     
     @Shadow @Final private static Logger LOGGER;
+    
+    // See renderHand field's own comment above - forces the reliable default here
+    // rather than trusting the field's inline initializer.
+    @Inject(method = "<init>", at = @At("RETURN"))
+    private void ip_onConstructed(CallbackInfo ci) {
+        renderHand = true;
+    }
     
     @Inject(method = "render", at = @At("HEAD"))
     private void onFarBeforeRendering(
@@ -229,12 +246,58 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     
     private static boolean portal_isRenderingHand = false;
     
-    @Inject(method = "renderItemInHand", at = @At("HEAD"))
+    // MC 26.1: ip_getDoRenderHand()/ip_setDoRenderHand(boolean) (this class's own
+    // `renderHand` @Unique field) previously had no actual call site reading its
+    // value at all (confirmed via full-repo grep - MyGameRenderer only ever called
+    // the getter to save/restore it around nested portal-content rendering, never to
+    // gate anything). Since WorldRenderInfo.Builder().setDoRenderHand(false) is used
+    // for every nested (portal-content) render, without this cancel the destination
+    // dimension's own GameRenderer.renderLevel() call would unconditionally render a
+    // SECOND player hand (using the portal-transformed nested camera), producing a
+    // visibly "doubled" hand - fixed by cancelling renderItemInHand() entirely
+    // whenever the flag is false.
+    @Inject(method = "renderItemInHand", at = @At("HEAD"), cancellable = true)
     private void onRenderHandBegins(
         net.minecraft.client.renderer.state.level.CameraRenderState cameraRenderState,
         float f, Matrix4fc matrix4fc, CallbackInfo ci
     ) {
+        // TEMP DIAGNOSTIC (2026-07-12): tracing why the hand stopped rendering
+        // entirely after gating this on renderHand. Remove once root-caused/fixed.
+        Helper.log("[HAND-DIAG] onRenderHandBegins renderHand=" + renderHand +
+            " portalRenderDepth=" + MyGameRenderer.portalRenderDepth);
+        if (!renderHand) {
+            ci.cancel();
+            return;
+        }
         portal_isRenderingHand = true;
+    }
+    
+    // MC 26.1: right before calling renderItemInHand(...), GameRenderer.renderLevel(...)
+    // unconditionally does RenderSystem.getDevice().createCommandEncoder()
+    // .clearDepthTexture(mainRenderTarget.getDepthTexture(), 1.0) (confirmed via
+    // decompiled source) - a real vanilla technique to make the hand always draw in
+    // front of the world, regardless of world depth. This call had NO existing guard
+    // anywhere in this mod (confirmed via full-repo grep) and isn't scoped to the
+    // stencil mask or any sub-region - since MyGameRenderer.switchAndRenderTheWorld
+    // calls this exact same GameRenderer.renderLevel(DeltaTracker) method for NESTED
+    // portal-content rendering too, every portal render was unconditionally wiping the
+    // ENTIRE main render target's depth buffer to the far plane, mid-frame, clobbering
+    // the outer world's already-drawn depth data everywhere on screen (not just within
+    // the portal) - a likely major contributor to the reported sky-in-front-of-
+    // everything / overworld-gets-clipped bugs. Skip it during nested rendering, same
+    // guard condition as RendererUsingStencil.replaceFrameBufferClearing() uses for the
+    // analogous main clear pass.
+    @Redirect(
+        method = "renderLevel",
+        at = @At(
+            value = "INVOKE",
+            target = "Lcom/mojang/blaze3d/systems/CommandEncoder;clearDepthTexture(Lcom/mojang/blaze3d/textures/GpuTexture;D)V"
+        )
+    )
+    private void redirectHandDepthClear(CommandEncoder commandEncoder, GpuTexture depthTexture, double depth) {
+        if (!WorldRenderInfo.isRendering()) {
+            commandEncoder.clearDepthTexture(depthTexture, depth);
+        }
     }
     
     @Inject(method = "renderItemInHand", at = @At("RETURN"))
@@ -357,6 +420,13 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     
     @Override
     public void ip_setDoRenderHand(boolean doRenderHand) {
+        // TEMP DIAGNOSTIC (2026-07-12): tracing why renderHand is false even at
+        // portalRenderDepth=0. Remove once root-caused/fixed.
+        if (renderHand != doRenderHand) {
+            Helper.log("[HAND-DIAG] ip_setDoRenderHand " + renderHand + " -> " + doRenderHand +
+                " portalRenderDepth=" + MyGameRenderer.portalRenderDepth);
+            new Throwable("[HAND-DIAG] stack").printStackTrace();
+        }
         renderHand = doRenderHand;
     }
     

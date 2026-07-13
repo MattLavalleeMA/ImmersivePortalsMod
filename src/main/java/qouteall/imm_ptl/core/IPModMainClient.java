@@ -80,7 +80,16 @@ public class IPModMainClient {
             IPCGlobal.rendererUsingStencil = new RendererUsingStencil();
             IPCGlobal.rendererUsingFrameBuffer = new RendererUsingFrameBuffer();
             
-            IPCGlobal.renderer = IPCGlobal.rendererUsingStencil;
+            // MC 26.1: stencil testing was removed from Blaze3D's RenderPipeline
+            // entirely (DepthStencilState has no stencil fields, and the main render
+            // target's depth texture format has no combined depth+stencil option --
+            // confirmed via decompiled source, see /memories/repo/
+            // portal-stencil-fbo3-bleed-finding.md) -- the main render target ends up
+            // with GL_STENCIL_BITS=0 regardless, making RendererUsingStencil's mask
+            // a no-op that always "passes". Switched to the render-to-texture +
+            // compositing-quad renderer instead, which needs no stencil/clip-plane
+            // cooperation from Sodium/Distant Horizons/Iris at all.
+            IPCGlobal.renderer = IPCGlobal.rendererUsingFrameBuffer;
         });
         
         DubiousThings.init();

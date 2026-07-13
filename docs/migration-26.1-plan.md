@@ -93,15 +93,22 @@ The mechanical fixes needed to get this cluster compiling clean (package moves,
 ctor/field renames, projection-matrix capture retargeting) are all done — see
 [migration-26.1-plan-completed.md](migration-26.1-plan-completed.md#rendering-pipeline--mechanical-fixes).
 
-**Still stubbed as no-ops (compiles, but non-functional), because they need
-genuinely new design work and can't be verified without an actual game launch —
-full detail on each in "Outstanding work" below:**
-- The stencil-based portal view-area masking algorithm itself
-  (`ViewAreaRenderer.renderPortalArea`/`buildPortalViewAreaTrianglesBuffer`,
-  `MyRenderHelper`'s screen-triangle/framebuffer-blit helpers) — these drew custom
-  triangles via `ShaderInstance`+`Tesselator`+`BufferUploader`, none of which exist
-  anymore, and the new pipeline has no dynamic stencil state to increment/test
-  against per nested portal layer in the first place.
+**Portal view-area stencil masking and nested-dimension camera/render-state
+bridging are now implemented and confirmed working via a real `runClient` launch
+(2026-07-12)** — see [Completed
+work](migration-26.1-plan-completed.md#portal-viewport-rendering-stencil-masking--nested-camera-bridging-implemented-launch-verified-no-crashes)
+for the full writeup. Portal content (the mod's core feature) now actually renders
+through the portal frame with zero crashes across a full launch+world-join+portal-
+look-through session; still needs a human visual check (camera alignment/FOV/
+orientation correctness) since these tools can't see the rendered 3D output directly.
+
+**Still stubbed as no-ops (compiles, but non-functional), lower priority than the
+above since the mod's core viewport feature now works without them — full detail on
+each in "Outstanding work" below:**
+- `MyRenderHelper.drawPortalAreaWithFramebuffer`/`drawFramebufferWithCoordinatesAndDimensions`
+  and the whole `RendererUsingFrameBuffer`/GUI-portal-preview path (`compatibility`
+  render mode + `ExampleGuiPortalRendering`'s inventory-portal-preview feature, NOT
+  the default `normal` stencil-based renderer used for the main in-world viewport).
 - The custom clip-plane shader-uniform injection system
   (`FrontClipping.updateClippingEquationUniformForCurrentShader`/
   `unsetClippingUniform`) — the control-flow half (when/where to enable/disable
@@ -174,6 +181,7 @@ policy (see the top of this document) — follow the links for the full story.
 - `./gradlew runClient` weave-time crash-fixing pass, round 3 (~10 more Mixin/data fixes surfacing from the Create-World-with-dim_stack and actual world-join workflow) — [done, fixes confirmed correct in round 4](migration-26.1-plan-completed.md#gradlew-runclient-weave-time-crash-fixing-pass-round-3--player-joinworld-creation-workflow-fixes-applied-not-yet-launch-verified).
 - `./gradlew runClient` weave-time crash-fixing pass, round 4 (5 more Mixin/runtime fixes) — [done — client now creates a world, joins it, and survives real gameplay including repeated nether-portal crossings](migration-26.1-plan-completed.md#gradlew-runclient-weave-time-crash-fixing-pass-round-4--first-successful-world-join--working-nether-portal-travel).
 - Gradle configuration cache enabled + two `build.gradle` config-cache incompatibilities fixed — [done](migration-26.1-plan-completed.md#gradle-configuration-cache-enabled--buildgradle-fixes--done).
+- Portal viewport rendering: stencil-masking algorithm (raw-GL bypass of Blaze3D) + nested-dimension camera/render-state bridging — [implemented, launch-verified (no crashes), pending human visual check](migration-26.1-plan-completed.md#portal-viewport-rendering-stencil-masking--nested-camera-bridging-implemented-launch-verified-no-crashes).
 
 ## Blocking / external dependency issues
 

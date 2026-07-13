@@ -51,7 +51,7 @@ public class IPConfig implements ConfigData {
     public boolean clientTolerantVersionMismatchWithServer = false;
     @ConfigEntry.Category("client")
     @ConfigEntry.Gui.Tooltip
-    public boolean compatibilityRenderMode = false;
+    public boolean compatibilityRenderMode = true;
     
     // client invisible configs
     

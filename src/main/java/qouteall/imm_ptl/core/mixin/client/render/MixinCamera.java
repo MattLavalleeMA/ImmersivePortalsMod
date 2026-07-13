@@ -37,6 +37,10 @@ public abstract class MixinCamera implements IECamera {
     private float eyeHeight;
     @Shadow
     private float eyeHeightOld;
+    @Shadow
+    private float fovModifier;
+    @Shadow
+    private float oldFovModifier;
     
     @Shadow
     protected abstract void setPosition(Vec3 vec3d_1);
@@ -117,6 +121,12 @@ public abstract class MixinCamera implements IECamera {
     @Override
     public void portal_setFocusedEntity(Entity arg) {
         entity = arg;
+    }
+    
+    @Override
+    public void ip_setFovModifier(float modifier) {
+        fovModifier = modifier;
+        oldFovModifier = modifier;
     }
     
     // MC 26.1: relocated from MixinGameRenderer's wrapCameraTransformation -- the
